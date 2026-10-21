@@ -79,7 +79,9 @@ function extractToken(text, excluding) {
 }
 
 function extractSecret(text) {
-  const match = text.match(/(?:secret|key)[^\n]*?found[^\n]*?[:="]\s*["']?([^\s"'*]{1,200})["']?/i)
+  // jwt_tool's crack mode prints: [+] <secret> is the CORRECT key!
+  const match = text.match(/\[\+\]\s+(.+?)\s+is the CORRECT key/i)
+    || text.match(/(?:secret|key)[^\n]*?found[^\n]*?[:="]\s*["']?([^\s"'*]{1,200})["']?/i)
     || text.match(/found[^\n]*?[:="]\s*["']?([^\s"'*]{1,200})["']?/i);
   return match ? match[1] : null;
 }
@@ -143,7 +145,9 @@ document.getElementById("crackBtn").addEventListener("click", async () => {
   const outputEl = document.getElementById("crackOutput");
   const foundBox = document.getElementById("crackFoundBox");
   const foundValue = document.getElementById("crackFoundValue");
+  const notFoundBox = document.getElementById("crackNotFoundBox");
   foundBox.classList.add("hidden");
+  notFoundBox.classList.add("hidden");
   outputEl.textContent = "";
 
   const fileInput = document.getElementById("customWordlist");
@@ -168,11 +172,23 @@ document.getElementById("crackBtn").addEventListener("click", async () => {
     if (secret) {
       foundValue.textContent = secret;
       foundBox.classList.remove("hidden");
+    } else {
+      notFoundBox.classList.remove("hidden");
     }
   } catch (err) {
     outputEl.textContent = err.message;
   } finally {
     setLoading(btn, false);
+  }
+});
+
+document.getElementById("crackUseBtn").addEventListener("click", () => {
+  const secret = document.getElementById("crackFoundValue").textContent;
+  if (secret) {
+    switchTab("forge");
+    signAlg.value = "hs256";
+    signAlg.dispatchEvent(new Event("change"));
+    document.getElementById("secret").value = secret;
   }
 });
 

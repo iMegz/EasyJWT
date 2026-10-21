@@ -69,10 +69,29 @@ def strip_banner(text):
     # the actual result.
     marker = "@ticarpi"
     idx = text.find(marker)
-    if idx == -1:
-        return text
-    rest = text[idx + len(marker):]
-    return rest.lstrip("\n")
+    if idx != -1:
+        text = text[idx + len(marker):]
+    return text.lstrip("\n")
+
+
+# Lines jwt_tool prints on a fresh container (config bootstrap, config file
+# path) that carry no useful information for someone using the web UI.
+NOISE_LINE_PATTERNS = (
+    "No config file yet created",
+    "Running config setup",
+    'Configuration file built',
+    'Make sure to set the "httplistener"',
+    "/jwtconf.ini",
+)
+
+
+def strip_noise_lines(text):
+    lines = text.split("\n")
+    kept = [
+        line for line in lines
+        if not any(pattern in line for pattern in NOISE_LINE_PATTERNS)
+    ]
+    return "\n".join(kept)
 
 
 def run_jwt_tool(args, timeout=120):
@@ -85,6 +104,7 @@ def run_jwt_tool(args, timeout=120):
     combined = result.stdout + result.stderr
     combined = strip_ansi(combined)
     combined = strip_banner(combined)
+    combined = strip_noise_lines(combined)
     return combined.strip()
 
 
