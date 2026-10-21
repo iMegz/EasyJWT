@@ -2,7 +2,7 @@
 
 A self-hosted web UI for ticarpi's jwt_tool. Paste a token, decode it, crack its secret, inject or forge claims, and run known JWT vulnerability exploits, all from a browser page.
 
-**Live instance:** [easyjwt.onrender.com](https://easyjwt.onrender.com/)
+**Live instance:** [easyjwt.imegz.dev](https://easyjwt.imegz.dev/)
 **Source:** [github.com/iMegz/EasyJWT](https://github.com/iMegz/EasyJWT)
 
 You can use the hosted instance above directly, no install needed, or run it yourself locally with the steps below.

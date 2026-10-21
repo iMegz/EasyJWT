@@ -8,12 +8,28 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
+  <script>
+    (function () {
+      var saved = localStorage.getItem("theme");
+      var theme = saved || (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+      document.documentElement.setAttribute("data-theme", theme);
+    })();
+  </script>
+  <!-- Cloudflare Web Analytics -->
+  <script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "f727b72099364c2c9276f5f3d1d51d1b"}'></script>
+  <!-- End Cloudflare Web Analytics -->
 </head>
 <body>
   <div class="shell">
     <header>
-      <div class="wordmark">
-        <span class="wordmark-easy">Easy</span><span class="wordmark-jwt">JWT</span>
+      <div class="header-row">
+        <div class="wordmark">
+          <span class="wordmark-easy">Easy</span><span class="wordmark-jwt">JWT</span>
+        </div>
+        <button id="themeToggle" class="icon-btn" aria-label="Switch to light theme" title="Switch theme">
+          <svg class="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path></svg>
+          <svg class="icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+        </button>
       </div>
       <p class="tagline">Decode, crack, forge and probe JSON Web Tokens.</p>
     </header>
@@ -201,11 +217,14 @@
 
     <footer>
       <p class="warning">For authorized testing only: your own apps, CTFs, and engagements you have permission for.</p>
-      <p class="credits">
-        <a href="https://github.com/iMegz/EasyJWT" target="_blank" rel="noopener">Source on GitHub</a>
-        <span class="credits-sep">&middot;</span>
-        Built by <a href="https://imegz.dev/" target="_blank" rel="noopener">Ahmed Magdi Mostafa, Full-Stack Developer</a>
-      </p>
+      <div class="credits">
+        <a href="https://github.com/iMegz/EasyJWT" target="_blank" rel="noopener" class="icon-btn" aria-label="Source on GitHub" title="Source on GitHub">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.73.5.5 5.73.5 12c0 5.08 3.29 9.38 7.86 10.9.57.1.78-.25.78-.55v-2.1c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.3-1.69-1.3-1.69-1.06-.72.08-.7.08-.7 1.17.08 1.79 1.2 1.79 1.2 1.04 1.78 2.73 1.27 3.4.97.1-.75.4-1.27.73-1.56-2.55-.29-5.24-1.28-5.24-5.7 0-1.26.45-2.29 1.19-3.09-.12-.29-.52-1.47.11-3.06 0 0 .97-.31 3.18 1.18a11.1 11.1 0 0 1 5.8 0c2.2-1.49 3.17-1.18 3.17-1.18.64 1.59.24 2.77.12 3.06.74.8 1.18 1.83 1.18 3.09 0 4.43-2.69 5.41-5.26 5.69.42.36.78 1.07.78 2.17v3.21c0 .3.21.66.79.55A10.5 10.5 0 0 0 23.5 12C23.5 5.73 18.27.5 12 .5z"/></svg>
+        </a>
+        <a href="https://imegz.dev/" target="_blank" rel="noopener" class="icon-btn" aria-label="Ahmed Magdi Mostafa" title="Ahmed Magdi Mostafa">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+        </a>
+      </div>
     </footer>
   </div>
 

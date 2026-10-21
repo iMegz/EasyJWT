@@ -1,6 +1,33 @@
 const tokenEl = document.getElementById("token");
 const tokenErrorEl = document.getElementById("tokenError");
 
+// ---------- Theme ----------
+(function () {
+  const toggle = document.getElementById("themeToggle");
+  const root = document.documentElement;
+
+  function currentTheme() {
+    return root.getAttribute("data-theme") === "light" ? "light" : "dark";
+  }
+
+  function applyTheme(theme) {
+    root.setAttribute("data-theme", theme);
+    toggle.setAttribute("aria-label", theme === "light" ? "Switch to dark theme" : "Switch to light theme");
+    toggle.setAttribute("title", theme === "light" ? "Switch to dark theme" : "Switch to light theme");
+  }
+
+  // Resolve the effective starting theme: saved choice, else system preference.
+  const saved = localStorage.getItem("theme");
+  const initial = saved || (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+  applyTheme(initial);
+
+  toggle.addEventListener("click", () => {
+    const next = currentTheme() === "light" ? "dark" : "light";
+    localStorage.setItem("theme", next);
+    applyTheme(next);
+  });
+})();
+
 // ---------- Tabs ----------
 document.querySelectorAll(".tab-btn").forEach((btn) => {
   btn.addEventListener("click", () => switchTab(btn.dataset.tab));
