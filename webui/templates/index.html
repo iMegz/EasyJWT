@@ -3,7 +3,33 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>EasyJWT</title>
+  <title>EasyJWT, free online JWT decoder, cracker and forge tool</title>
+  <meta name="description" content="Decode, crack, forge and probe JSON Web Tokens in your browser. Free, no sign-up, nothing you paste is sent anywhere else.">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://easyjwt.imegz.dev/">
+  <meta name="author" content="Ahmed Magdi Mostafa">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="EasyJWT">
+  <meta property="og:title" content="EasyJWT, free online JWT decoder, cracker and forge tool">
+  <meta property="og:description" content="Decode, crack, forge and probe JSON Web Tokens in your browser. Free, no sign-up, nothing you paste is sent anywhere else.">
+  <meta property="og:url" content="https://easyjwt.imegz.dev/">
+  <meta property="og:image" content="https://easyjwt.imegz.dev/static/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="EasyJWT, free online JWT decoder, cracker and forge tool">
+  <meta name="twitter:description" content="Decode, crack, forge and probe JSON Web Tokens in your browser. Free, no sign-up, nothing you paste is sent anywhere else.">
+  <meta name="twitter:image" content="https://easyjwt.imegz.dev/static/og-image.png">
+
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/static/favicon-32.png" type="image/png" sizes="32x32">
+  <link rel="icon" href="/static/favicon-16.png" type="image/png" sizes="16x16">
+  <link rel="shortcut icon" href="/favicon.ico">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <link rel="manifest" href="/static/site.webmanifest">
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -13,11 +39,36 @@
       var saved = localStorage.getItem("theme");
       var theme = saved || (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
       document.documentElement.setAttribute("data-theme", theme);
+      var meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute("content", theme === "light" ? "#f6f4ef" : "#0d0f14");
     })();
   </script>
+  <meta name="theme-color" content="#0d0f14">
   <!-- Cloudflare Web Analytics -->
   <script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "f727b72099364c2c9276f5f3d1d51d1b"}'></script>
   <!-- End Cloudflare Web Analytics -->
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "EasyJWT",
+    "url": "https://easyjwt.imegz.dev/",
+    "description": "Decode, crack, forge and probe JSON Web Tokens in your browser.",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "Any",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "author": {
+      "@type": "Person",
+      "name": "Ahmed Magdi Mostafa",
+      "url": "https://imegz.dev/"
+    }
+  }
+  </script>
 </head>
 <body>
   <div class="shell">

@@ -1,0 +1,13 @@
+{
+  "name": "EasyJWT",
+  "short_name": "EasyJWT",
+  "description": "Decode, crack, forge and probe JSON Web Tokens.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d0f14",
+  "theme_color": "#0d0f14",
+  "icons": [
+    { "src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

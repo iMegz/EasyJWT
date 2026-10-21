@@ -9,13 +9,14 @@ import tempfile
 import time
 from functools import wraps
 
-from flask import Flask, jsonify, render_template, request, Response
+from flask import Flask, jsonify, render_template, request, Response, send_from_directory
 
 app = Flask(__name__)
 
 WORDLISTS_DIR = "/wordlists"
 JWT_TOOL = "jwt_tool.py"
 MAX_CUSTOM_WORDLIST_BYTES = 2 * 1024 * 1024  # 2 MB
+SITE_URL = os.environ.get("SITE_URL", "https://easyjwt.imegz.dev")
 
 AUTH_USER = os.environ.get("AUTH_USER")
 AUTH_PASS = os.environ.get("AUTH_PASS")
@@ -123,6 +124,41 @@ def builtin_wordlist_paths():
 @auth_required
 def index():
     return render_template("index.html")
+
+
+@app.route("/robots.txt")
+def robots_txt():
+    content = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        "Disallow: /api/\n"
+        "\n"
+        f"Sitemap: {SITE_URL}/sitemap.xml\n"
+    )
+    return Response(content, mimetype="text/plain")
+
+
+@app.route("/sitemap.xml")
+def sitemap_xml():
+    content = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        "  <url>\n"
+        f"    <loc>{SITE_URL}/</loc>\n"
+        "    <changefreq>monthly</changefreq>\n"
+        "    <priority>1.0</priority>\n"
+        "  </url>\n"
+        "</urlset>\n"
+    )
+    return Response(content, mimetype="application/xml")
+
+
+@app.route("/favicon.ico")
+def favicon_ico():
+    return send_from_directory(
+        os.path.join(app.root_path, "static"), "favicon.ico",
+        mimetype="image/vnd.microsoft.icon",
+    )
 
 
 @app.route("/api/decode", methods=["POST"])
