@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EasyJWT</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <div class="wordmark">
+        <span class="wordmark-easy">Easy</span><span class="wordmark-jwt">JWT</span>
+      </div>
+      <p class="tagline">Decode, crack, forge and probe JSON Web Tokens.</p>
+    </header>
+
+    <section class="token-panel">
+      <label for="token" class="field-label">Token</label>
+      <div class="token-field" id="tokenField">
+        <textarea id="token" rows="3" spellcheck="false" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...."></textarea>
+        <div class="token-segments" aria-hidden="true">
+          <span class="seg seg-header"></span><span class="seg-dot">.</span><span class="seg seg-payload"></span><span class="seg-dot">.</span><span class="seg seg-signature"></span>
+        </div>
+      </div>
+      <p id="tokenError" class="error hidden"></p>
+    </section>
+
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="decode">
+        <span class="tab-dot header"></span>Decode
+      </button>
+      <button class="tab-btn" data-tab="crack">
+        <span class="tab-dot payload"></span>Crack
+      </button>
+      <button class="tab-btn" data-tab="forge">
+        <span class="tab-dot signature"></span>Forge
+      </button>
+      <button class="tab-btn" data-tab="exploits">
+        <span class="tab-dot warn"></span>Exploits
+      </button>
+    </nav>
+
+    <main>
+      <section id="decode" class="tab-panel active">
+        <p class="hint">Reads the token's header and payload, nothing is sent anywhere else.</p>
+        <button id="decodeBtn" class="primary-btn">Decode token</button>
+        <div class="columns">
+          <div class="panel">
+            <div class="panel-head"><h3>Header</h3><button class="copy-btn hidden" data-copy-target="decodeHeader">Copy</button></div>
+            <pre id="decodeHeader" class="output-block"></pre>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h3>Payload</h3><button class="copy-btn hidden" data-copy-target="decodePayload">Copy</button></div>
+            <pre id="decodePayload" class="output-block"></pre>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h3>Signature</h3><button class="copy-btn hidden" data-copy-target="decodeSignature">Copy</button></div>
+          <pre id="decodeSignature" class="output-block"></pre>
+        </div>
+      </section>
+
+      <section id="crack" class="tab-panel">
+        <p class="hint">Checks the token's secret against a built-in dictionary automatically. Add your own list for this run only, nothing you upload is kept, and the built-in list stays private.</p>
+        <label class="file-label" for="customWordlist">
+          <span>Your own wordlist</span>
+          <span class="file-note">.txt, 2 MB max, optional</span>
+        </label>
+        <input id="customWordlist" type="file" accept=".txt">
+        <button id="crackBtn" class="primary-btn">Crack</button>
+
+        <div id="crackFoundBox" class="result-box found hidden">
+          <strong>Secret found</strong>
+          <div class="panel-head">
+            <code id="crackFoundValue"></code>
+            <button class="copy-btn" data-copy-target="crackFoundValue">Copy</button>
+          </div>
+        </div>
+
+        <details class="raw-output">
+          <summary>Full output</summary>
+          <pre id="crackOutput" class="output-block"></pre>
+        </details>
+      </section>
+
+      <section id="forge" class="tab-panel">
+        <h3>Inject or update a claim</h3>
+        <p class="hint">Leave a claim blank to skip it, set a header claim, a payload claim, or both in one run.</p>
+        <div class="field-row">
+          <label>Header claim <input id="headerClaim" type="text" placeholder="alg"></label>
+          <label>Header value <input id="headerValue" type="text"></label>
+        </div>
+        <div class="field-row">
+          <label>Payload claim <input id="payloadClaim" type="text" placeholder="sub"></label>
+          <label>Payload value <input id="payloadValue" type="text"></label>
+        </div>
+
+        <h3>Signing</h3>
+        <p class="hint">HMAC needs a secret, such as one you just cracked. RSA, EC and PSS need a private key.</p>
+        <label>Algorithm
+          <select id="signAlg">
+            <option value="">Keep unsigned / no change</option>
+            <option value="hs256">HS256 (HMAC)</option>
+            <option value="hs384">HS384 (HMAC)</option>
+            <option value="hs512">HS512 (HMAC)</option>
+            <option value="rs256">RS256 (RSA)</option>
+            <option value="rs384">RS384 (RSA)</option>
+            <option value="rs512">RS512 (RSA)</option>
+            <option value="es256">ES256 (EC)</option>
+            <option value="es384">ES384 (EC)</option>
+            <option value="es512">ES512 (EC)</option>
+            <option value="ps256">PS256 (RSA-PSS)</option>
+            <option value="ps384">PS384 (RSA-PSS)</option>
+            <option value="ps512">PS512 (RSA-PSS)</option>
+          </select>
+        </label>
+
+        <div id="hmacField" class="field-row hidden">
+          <label>Secret <input id="secret" type="text" placeholder="Secret or cracked key"></label>
+        </div>
+
+        <div id="asymField" class="field-row hidden">
+          <label>Private key (PEM)
+            <textarea id="privateKey" rows="4" placeholder="-----BEGIN PRIVATE KEY-----"></textarea>
+          </label>
+        </div>
+
+        <button id="forgeBtn" class="primary-btn">Run</button>
+
+        <div id="forgeTokenBox" class="result-box found hidden">
+          <strong>Resulting token</strong>
+          <div class="panel-head">
+            <code id="forgeTokenValue" class="token-value"></code>
+            <button class="copy-btn" data-copy-target="forgeTokenValue">Copy</button>
+          </div>
+          <button id="forgeUseBtn" class="secondary-btn">Load into Decode</button>
+        </div>
+
+        <details class="raw-output">
+          <summary>Full output</summary>
+          <pre id="forgeOutput" class="output-block"></pre>
+        </details>
+      </section>
+
+      <section id="exploits" class="tab-panel">
+        <h3>Known vulnerabilities</h3>
+        <label>Exploit
+          <select id="exploitCode">
+            <option value="a">alg:none</option>
+            <option value="n">Null signature</option>
+            <option value="b">Blank password accepted</option>
+            <option value="p">Psychic signature (ECDSA)</option>
+            <option value="k">Key confusion (needs public key)</option>
+            <option value="i">Inject inline JWKS</option>
+            <option value="s">Spoof JWKS (needs URL)</option>
+          </select>
+        </label>
+        <p id="exploitDesc" class="hint"></p>
+
+        <div id="pubkeyField" class="field-row hidden">
+          <label>Public key (PEM)
+            <textarea id="pubkey" rows="4" placeholder="-----BEGIN PUBLIC KEY-----"></textarea>
+          </label>
+        </div>
+
+        <div id="jwksUrlField" class="field-row hidden">
+          <label>JWKS URL <input id="jwksUrl" type="text" placeholder="https://your-listener/jwks.json"></label>
+        </div>
+
+        <button id="exploitBtn" class="primary-btn">Run exploit</button>
+
+        <div id="exploitTokenBox" class="result-box found hidden">
+          <strong>Resulting token</strong>
+          <div class="panel-head">
+            <code id="exploitTokenValue" class="token-value"></code>
+            <button class="copy-btn" data-copy-target="exploitTokenValue">Copy</button>
+          </div>
+          <button id="exploitUseBtn" class="secondary-btn">Load into Decode</button>
+        </div>
+
+        <details class="raw-output">
+          <summary>Full output</summary>
+          <pre id="exploitOutput" class="output-block"></pre>
+        </details>
+      </section>
+    </main>
+
+    <footer>
+      <p class="warning">For authorized testing only: your own apps, CTFs, and engagements you have permission for.</p>
+    </footer>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
