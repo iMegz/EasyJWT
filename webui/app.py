@@ -1,5 +1,6 @@
 import base64
 import re
+import jwt
 import glob
 import json
 import os
@@ -54,6 +55,10 @@ def rate_limited(f):
 def b64url_decode(segment):
     padding = "=" * (-len(segment) % 4)
     return base64.urlsafe_b64decode(segment + padding)
+
+
+def b64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
 
 ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
@@ -206,49 +211,48 @@ def crack():
 @rate_limited
 def forge():
     data = request.json
-    token = data.get("token", "").strip()
-    header_claim = data.get("header_claim", "").strip()
-    header_value = data.get("header_value", "")
-    payload_claim = data.get("payload_claim", "").strip()
-    payload_value = data.get("payload_value", "")
+    header_json = data.get("header_json", "").strip()
+    payload_json = data.get("payload_json", "").strip()
     sign_alg = data.get("sign_alg", "").strip()
     secret = data.get("secret", "")
     private_key = data.get("private_key", "")
 
-    if not token:
-        return jsonify({"error": "Token is required"}), 400
-
-    args = [token]
-    if header_claim:
-        args += ["-hc", header_claim, "-hv", header_value]
-    if payload_claim:
-        args += ["-pc", payload_claim, "-pv", payload_value]
-    if header_claim or payload_claim:
-        args.insert(1, "-I")
-
-    tmp_key_path = None
-    if sign_alg:
-        args += ["-S", sign_alg]
-        if sign_alg.startswith("hs"):
-            args += ["-p", secret]
-        elif private_key:
-            fd, tmp_key_path = tempfile.mkstemp(suffix=".pem")
-            with os.fdopen(fd, "w") as f:
-                f.write(private_key)
-            args += ["-pr", tmp_key_path]
-
-    if len(args) == 1:
-        return jsonify({"error": "Nothing to do, set a claim to inject or a signing method"}), 400
+    if not header_json or not payload_json:
+        return jsonify({"error": "Header and payload JSON are both required"}), 400
 
     try:
-        output = run_jwt_tool(args)
-    except subprocess.TimeoutExpired:
-        output = "Request timed out"
-    finally:
-        if tmp_key_path and os.path.exists(tmp_key_path):
-            os.remove(tmp_key_path)
+        header = json.loads(header_json)
+    except Exception as exc:
+        return jsonify({"error": f"Header is not valid JSON: {exc}"}), 400
+    try:
+        payload = json.loads(payload_json)
+    except Exception as exc:
+        return jsonify({"error": f"Payload is not valid JSON: {exc}"}), 400
 
-    return jsonify({"output": output})
+    if not isinstance(header, dict):
+        return jsonify({"error": "Header must be a JSON object"}), 400
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Payload must be a JSON object"}), 400
+
+    try:
+        if not sign_alg:
+            header.setdefault("typ", "JWT")
+            header.setdefault("alg", "none")
+            header_b64 = b64url_encode(json.dumps(header, separators=(",", ":")).encode())
+            payload_b64 = b64url_encode(json.dumps(payload, separators=(",", ":")).encode())
+            token = f"{header_b64}.{payload_b64}."
+        elif sign_alg.startswith("hs"):
+            if not secret:
+                return jsonify({"error": "HMAC signing needs a secret"}), 400
+            token = jwt.encode(payload, secret, algorithm=sign_alg.upper(), headers=header)
+        else:
+            if not private_key:
+                return jsonify({"error": "This algorithm needs a private key"}), 400
+            token = jwt.encode(payload, private_key, algorithm=sign_alg.upper(), headers=header)
+    except Exception as exc:
+        return jsonify({"error": f"Could not build the token: {exc}"}), 400
+
+    return jsonify({"token": token})
 
 
 @app.route("/api/exploit", methods=["POST"])

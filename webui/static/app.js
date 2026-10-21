@@ -182,10 +182,13 @@ document.getElementById("crackBtn").addEventListener("click", async () => {
   }
 });
 
-document.getElementById("crackUseBtn").addEventListener("click", () => {
+document.getElementById("crackUseBtn").addEventListener("click", async () => {
   const secret = document.getElementById("crackFoundValue").textContent;
   if (secret) {
     switchTab("forge");
+    if (!forgeHeaderEl.value.trim() && !forgePayloadEl.value.trim()) {
+      await loadTokenIntoForge();
+    }
     signAlg.value = "hs256";
     signAlg.dispatchEvent(new Event("change"));
     document.getElementById("secret").value = secret;
@@ -194,42 +197,86 @@ document.getElementById("crackUseBtn").addEventListener("click", () => {
 
 // ---------- Forge ----------
 const signAlg = document.getElementById("signAlg");
+const forgeHeaderEl = document.getElementById("forgeHeaderJson");
+const forgePayloadEl = document.getElementById("forgePayloadJson");
+
 signAlg.addEventListener("change", () => {
   const val = signAlg.value;
   document.getElementById("hmacField").classList.toggle("hidden", !val.startsWith("hs"));
   document.getElementById("asymField").classList.toggle("hidden", !(val && !val.startsWith("hs")));
 });
 
+async function loadTokenIntoForge() {
+  if (!tokenEl.value.trim()) return;
+  try {
+    const data = await postJSON("/api/decode", { token: tokenEl.value });
+    forgeHeaderEl.value = data.header;
+    forgePayloadEl.value = data.payload;
+    document.getElementById("forgeHeaderError").classList.add("hidden");
+    document.getElementById("forgePayloadError").classList.add("hidden");
+  } catch (err) {
+    // leave fields as-is, token might not be decodable, user can still type JSON by hand
+  }
+}
+
+document.getElementById("forgeLoadBtn").addEventListener("click", loadTokenIntoForge);
+
+// Auto-populate the first time the Forge tab is opened, if it's still empty.
+document.querySelector('.tab-btn[data-tab="forge"]').addEventListener("click", () => {
+  if (!forgeHeaderEl.value.trim() && !forgePayloadEl.value.trim()) {
+    loadTokenIntoForge();
+  }
+});
+
+function validateJsonField(el, errorEl) {
+  const text = el.value.trim();
+  if (!text) {
+    errorEl.textContent = "This field is required.";
+    errorEl.classList.remove("hidden");
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(text);
+    if (typeof parsed !== "object" || Array.isArray(parsed) || parsed === null) {
+      errorEl.textContent = "Must be a JSON object, like { \"key\": \"value\" }.";
+      errorEl.classList.remove("hidden");
+      return null;
+    }
+    errorEl.classList.add("hidden");
+    return text;
+  } catch (err) {
+    errorEl.textContent = "Not valid JSON: " + err.message;
+    errorEl.classList.remove("hidden");
+    return null;
+  }
+}
+
 document.getElementById("forgeBtn").addEventListener("click", async () => {
-  if (!requireToken()) return;
   const btn = document.getElementById("forgeBtn");
-  const outputEl = document.getElementById("forgeOutput");
   const tokenBox = document.getElementById("forgeTokenBox");
   const tokenValue = document.getElementById("forgeTokenValue");
+  const forgeErrorEl = document.getElementById("forgeError");
   tokenBox.classList.add("hidden");
-  outputEl.textContent = "";
+  forgeErrorEl.classList.add("hidden");
+
+  const headerJson = validateJsonField(forgeHeaderEl, document.getElementById("forgeHeaderError"));
+  const payloadJson = validateJsonField(forgePayloadEl, document.getElementById("forgePayloadError"));
+  if (!headerJson || !payloadJson) return;
 
   setLoading(btn, true);
   try {
     const data = await postJSON("/api/forge", {
-      token: tokenEl.value,
-      header_claim: document.getElementById("headerClaim").value,
-      header_value: document.getElementById("headerValue").value,
-      payload_claim: document.getElementById("payloadClaim").value,
-      payload_value: document.getElementById("payloadValue").value,
+      header_json: headerJson,
+      payload_json: payloadJson,
       sign_alg: signAlg.value,
       secret: document.getElementById("secret").value,
       private_key: document.getElementById("privateKey").value,
     });
-    outputEl.textContent = data.output;
-
-    const newToken = extractToken(data.output, tokenEl.value.trim());
-    if (newToken) {
-      tokenValue.textContent = newToken;
-      tokenBox.classList.remove("hidden");
-    }
+    tokenValue.textContent = data.token;
+    tokenBox.classList.remove("hidden");
   } catch (err) {
-    outputEl.textContent = err.message;
+    forgeErrorEl.textContent = err.message;
+    forgeErrorEl.classList.remove("hidden");
   } finally {
     setLoading(btn, false);
   }

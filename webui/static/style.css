@@ -472,3 +472,16 @@ footer {
     font-size: 1.4rem;
   }
 }
+
+h4 {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin: 0 0 0.3rem;
+  text-transform: none;
+}
+
+.json-editor {
+  min-height: 140px;
+  line-height: 1.5;
+}

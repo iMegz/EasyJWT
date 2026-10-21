@@ -93,22 +93,30 @@
       </section>
 
       <section id="forge" class="tab-panel">
-        <h3>Inject or update a claim</h3>
-        <p class="hint">Leave a claim blank to skip it, set a header claim, a payload claim, or both in one run.</p>
-        <div class="field-row">
-          <label>Header claim <input id="headerClaim" type="text" placeholder="alg"></label>
-          <label>Header value <input id="headerValue" type="text"></label>
+        <div class="panel-head">
+          <h3>Edit the token</h3>
+          <button id="forgeLoadBtn" class="secondary-btn">Load current token</button>
         </div>
-        <div class="field-row">
-          <label>Payload claim <input id="payloadClaim" type="text" placeholder="sub"></label>
-          <label>Payload value <input id="payloadValue" type="text"></label>
+        <p class="hint">Edit the header and payload directly, add, change or remove any claim, then sign below. Both boxes need to stay valid JSON.</p>
+
+        <div class="columns">
+          <div class="panel">
+            <div class="panel-head"><h4>Header</h4></div>
+            <textarea id="forgeHeaderJson" rows="6" class="json-editor" spellcheck="false" placeholder='{&#10;  "alg": "HS256",&#10;  "typ": "JWT"&#10;}'></textarea>
+            <p id="forgeHeaderError" class="error hidden"></p>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h4>Payload</h4></div>
+            <textarea id="forgePayloadJson" rows="6" class="json-editor" spellcheck="false" placeholder='{&#10;  "sub": "1234567890"&#10;}'></textarea>
+            <p id="forgePayloadError" class="error hidden"></p>
+          </div>
         </div>
 
         <h3>Signing</h3>
-        <p class="hint">HMAC needs a secret, such as one you just cracked. RSA, EC and PSS need a private key.</p>
+        <p class="hint">HMAC needs a secret, such as one you just cracked. RSA, EC and PSS need a private key. Leaving this unsigned produces a token with no signature at all, matching the header exactly as written above.</p>
         <label>Algorithm
           <select id="signAlg">
-            <option value="">Keep unsigned / no change</option>
+            <option value="">Leave unsigned (empty signature)</option>
             <option value="hs256">HS256 (HMAC)</option>
             <option value="hs384">HS384 (HMAC)</option>
             <option value="hs512">HS512 (HMAC)</option>
@@ -134,7 +142,7 @@
           </label>
         </div>
 
-        <button id="forgeBtn" class="primary-btn">Run</button>
+        <button id="forgeBtn" class="primary-btn">Sign and build token</button>
 
         <div id="forgeTokenBox" class="result-box found hidden">
           <strong>Resulting token</strong>
@@ -145,10 +153,7 @@
           <button id="forgeUseBtn" class="secondary-btn">Load into Decode</button>
         </div>
 
-        <details class="raw-output">
-          <summary>Full output</summary>
-          <pre id="forgeOutput" class="output-block"></pre>
-        </details>
+        <p id="forgeError" class="error hidden"></p>
       </section>
 
       <section id="exploits" class="tab-panel">
