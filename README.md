@@ -3,6 +3,7 @@
 A self-hosted web UI for ticarpi's jwt_tool. Paste a token, decode it, crack its secret, inject or forge claims, and run known JWT vulnerability exploits, all from a browser page.
 
 **Live instance:** [easyjwt.onrender.com](https://easyjwt.onrender.com/)
+**Source:** [github.com/iMegz/EasyJWT](https://github.com/iMegz/EasyJWT)
 
 You can use the hosted instance above directly, no install needed, or run it yourself locally with the steps below.
 
@@ -49,3 +50,7 @@ Edit or replace the `.txt` files in `wordlists/`. All `.txt` files in that folde
 ## Notes
 
 The web UI runs jwt_tool's own Python code under the hood, it's a thin wrapper, not a reimplementation. If jwt_tool's command line flags change in a future version, the Forge and Exploits tabs may need matching updates in `webui/app.py`.
+
+---
+
+Built by [Ahmed Magdi Mostafa, Full-Stack Developer](https://imegz.dev/)
