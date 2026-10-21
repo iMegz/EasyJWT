@@ -1,10 +1,13 @@
 FROM ticarpi/jwt_tool
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends libffi-dev gcc \
-    && rm -rf /var/lib/apt/lists/*
+# Build tooling in case pip has to compile cryptography/cffi from source
+# rather than use a prebuilt wheel (musllinux wheels aren't always available
+# for every architecture/Python combo, and cryptography's Rust extension
+# needs a Rust toolchain to build from source).
+RUN apk add --no-cache libffi-dev gcc musl-dev openssl-dev rust cargo
 
-RUN pip3 install --no-cache-dir flask "pyjwt[crypto]"
+RUN pip3 install --no-cache-dir --upgrade pip \
+    && pip3 install --no-cache-dir flask "pyjwt[crypto]"
 
 # Pre-create jwt_tool's config file at build time so the first request a
 # container handles never hits its interactive first-run setup message.
