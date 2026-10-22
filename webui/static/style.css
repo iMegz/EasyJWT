@@ -273,26 +273,8 @@ select {
   display: none;
 }
 
-#fetchKidRow {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  flex-wrap: wrap;
-  margin: 0.4rem 0 0.6rem;
-}
-
-#fetchKidRow.hidden {
-  display: none;
-}
-
-#fetchKidRow select {
-  width: auto;
-  flex: 0 1 auto;
-}
-
 #fetchKidStatus {
-  margin: 0;
-  flex-basis: 100%;
+  margin: 0.3rem 0 0;
 }
 
 .checkbox-field {

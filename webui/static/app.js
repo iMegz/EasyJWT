@@ -105,10 +105,9 @@ function resetDerivedState() {
   document.getElementById("pubkey").value = "";
   document.getElementById("kidPath").value = "";
   document.getElementById("jwksUrl").value = "";
-  document.getElementById("jwksKid").value = "";
-  document.getElementById("fetchedKidSelect").classList.add("hidden");
-  document.getElementById("fetchedKidSelect").innerHTML = "";
+  resetJwksKidSelect();
   document.getElementById("fetchKidStatus").textContent = "";
+  document.getElementById("noneVariants").checked = false;
   document.getElementById("exploitOutput").textContent = "";
   document.getElementById("exploitResults").innerHTML = "";
 }
@@ -471,48 +470,54 @@ function updateExploitUI() {
   document.getElementById("kidPathField").classList.toggle("hidden", exploitCode.value !== "t");
   document.getElementById("jwksUrlField").classList.toggle("hidden", exploitCode.value !== "s");
   document.getElementById("jwksKidField").classList.toggle("hidden", exploitCode.value !== "s");
-  document.getElementById("fetchKidRow").classList.toggle("hidden", exploitCode.value !== "s");
+  document.getElementById("noneVariantsField").classList.toggle("hidden", exploitCode.value !== "a");
   document.getElementById("exploitDesc").textContent = exploitDescriptions[exploitCode.value] || "";
 }
 exploitCode.addEventListener("change", updateExploitUI);
 
-// ---------- Spoof JWKS: fetch kid(s) from a hosted JWKS URL ----------
-document.getElementById("fetchKidBtn").addEventListener("click", async () => {
+// ---------- Spoof JWKS: kid dropdown, fetched from the URL automatically ----------
+// The two built-in options (Manual, Default) are marked with data-builtin and
+// never removed; only options fetched from a URL get added/cleared around them.
+function resetJwksKidSelect() {
+  const selectEl = document.getElementById("jwksKidSelect");
+  selectEl.querySelectorAll("option:not([data-builtin])").forEach((opt) => opt.remove());
+  selectEl.value = "easyjwt-default-1";
+}
+
+async function fetchJwksKidsForSelect() {
   const url = document.getElementById("jwksUrl").value.trim();
   const statusEl = document.getElementById("fetchKidStatus");
-  const selectEl = document.getElementById("fetchedKidSelect");
-  const kidInput = document.getElementById("jwksKid");
-  selectEl.classList.add("hidden");
-  selectEl.innerHTML = "";
+  const selectEl = document.getElementById("jwksKidSelect");
+  resetJwksKidSelect();
   if (!url) {
-    statusEl.textContent = "Type a JWKS URL above first, or leave both blank to use EasyJWT's own default key and kid.";
+    statusEl.textContent = "";
     return;
   }
-  statusEl.textContent = "Fetching...";
+  statusEl.textContent = "Fetching kid(s) from that URL...";
   try {
     const data = await postJSON("/api/fetch-jwks-kids", { url });
     const kids = data.kids || [];
-    if (kids.length === 1) {
-      kidInput.value = kids[0];
-      statusEl.textContent = `Found one key, kid set to "${kids[0]}".`;
+    kids.forEach((kid) => {
+      const opt = document.createElement("option");
+      opt.value = kid;
+      opt.textContent = kid;
+      selectEl.appendChild(opt);
+    });
+    if (kids.length) {
+      selectEl.value = kids[0];
+      statusEl.textContent = kids.length === 1
+        ? `Found one key there, kid set to "${kids[0]}".`
+        : `Found ${kids.length} keys there, picked the first, use the dropdown to choose a different one.`;
     } else {
-      kids.forEach((kid) => {
-        const opt = document.createElement("option");
-        opt.value = kid;
-        opt.textContent = kid;
-        selectEl.appendChild(opt);
-      });
-      selectEl.classList.remove("hidden");
-      kidInput.value = kids[0];
-      statusEl.textContent = `Found ${kids.length} keys, pick one (or type your own below).`;
+      statusEl.textContent = "That URL didn't have any kid to offer, left on Default.";
     }
   } catch (err) {
     statusEl.textContent = err.message;
   }
-});
-document.getElementById("fetchedKidSelect").addEventListener("change", (e) => {
-  document.getElementById("jwksKid").value = e.target.value;
-});
+}
+// Fires on blur (paste-then-click-away, paste-then-switch-field), not on
+// every keystroke, same reasoning as the shared token field's own listener.
+document.getElementById("jwksUrl").addEventListener("change", fetchJwksKidsForSelect);
 updateExploitUI();
 
 document.getElementById("exploitBtn").addEventListener("click", async () => {
@@ -546,8 +551,9 @@ document.getElementById("exploitBtn").addEventListener("click", async () => {
       code: exploitCode.value,
       pubkey: document.getElementById("pubkey").value,
       jwks_url: document.getElementById("jwksUrl").value,
-      kid: document.getElementById("jwksKid").value,
+      kid: document.getElementById("jwksKidSelect").value,
       kid_path: document.getElementById("kidPath").value,
+      none_variants: document.getElementById("noneVariants").checked,
     });
 
     outputEl.textContent = (edited
