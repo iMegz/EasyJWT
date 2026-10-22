@@ -103,6 +103,7 @@ function resetDerivedState() {
   exploitLoadedHeaderJson = null;
   exploitLoadedPayloadJson = null;
   document.getElementById("pubkey").value = "";
+  document.getElementById("kidPath").value = "";
   document.getElementById("jwksUrl").value = "";
   document.getElementById("jwksKid").value = "";
   document.getElementById("fetchedKidSelect").classList.add("hidden");
@@ -431,11 +432,13 @@ const exploitDescriptions = {
   k: "Signs the token with HMAC using the provided RSA/EC public key as the secret, exploits servers that use the same key for both verifying RS/ES tokens and HMAC tokens.",
   i: "Embeds a JWKS directly in the token header (jwk claim) pointing to attacker-controlled key material.",
   s: "Points the token's jku header at a JWKS URL the server may fetch and trust, always signed with EasyJWT's built-in default key. Leave the URL blank to use EasyJWT's own hosted /jwks.json, or paste your own URL (e.g. a lab's exploit server) if the target can't reach that domain, just host the same key there (copy it from /jwks.json).",
+  t: "Points the kid header at a path on the server's own filesystem, betting it gets read as the HMAC key, then signs with HS256 using an empty-string secret, matching a predictable empty file like /dev/null. Try other paths if the default doesn't work.",
 };
 
 const exploitCode = document.getElementById("exploitCode");
 function updateExploitUI() {
   document.getElementById("pubkeyField").classList.toggle("hidden", exploitCode.value !== "k");
+  document.getElementById("kidPathField").classList.toggle("hidden", exploitCode.value !== "t");
   document.getElementById("jwksUrlField").classList.toggle("hidden", exploitCode.value !== "s");
   document.getElementById("jwksKidField").classList.toggle("hidden", exploitCode.value !== "s");
   document.getElementById("fetchKidRow").classList.toggle("hidden", exploitCode.value !== "s");
@@ -516,6 +519,7 @@ document.getElementById("exploitBtn").addEventListener("click", async () => {
       pubkey: document.getElementById("pubkey").value,
       jwks_url: document.getElementById("jwksUrl").value,
       kid: document.getElementById("jwksKid").value,
+      kid_path: document.getElementById("kidPath").value,
     });
 
     outputEl.textContent = (edited

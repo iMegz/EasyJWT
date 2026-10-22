@@ -262,6 +262,7 @@
             <option value="k">Key confusion (needs public key)</option>
             <option value="i">Inject inline JWKS</option>
             <option value="s">Spoof JWKS</option>
+            <option value="t">kid header path traversal</option>
           </select>
         </label>
         <p id="exploitDesc" class="hint"></p>
@@ -269,6 +270,12 @@
         <div id="pubkeyField" class="field-row hidden">
           <label>Public key (PEM)
             <textarea id="pubkey" rows="4" placeholder="-----BEGIN PUBLIC KEY-----"></textarea>
+          </label>
+        </div>
+
+        <div id="kidPathField" class="field-row hidden">
+          <label>Path to claim as kid
+            <input id="kidPath" type="text" placeholder="../../../../../../dev/null">
           </label>
         </div>
 
