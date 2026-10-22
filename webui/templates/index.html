@@ -267,6 +267,13 @@
         </label>
         <p id="exploitDesc" class="hint"></p>
 
+        <div id="noneVariantsField" class="field-row hidden">
+          <label class="checkbox-field">
+            <input type="checkbox" id="noneVariants">
+            <span>Include case variants (None, NONE, nOnE, noNe) alongside plain "none". Off by default, same speed either way, just fewer results to scroll past.</span>
+          </label>
+        </div>
+
         <div id="pubkeyField" class="field-row hidden">
           <label>Public key (PEM)
             <textarea id="pubkey" rows="4" placeholder="-----BEGIN PUBLIC KEY-----"></textarea>
@@ -284,13 +291,12 @@
         </div>
 
         <div id="jwksKidField" class="field-row hidden">
-          <label>kid to claim (optional)
-            <input id="jwksKid" type="text" placeholder="Auto: easyjwt-default-1, unless you fetch or type one">
+          <label>kid to claim
+            <select id="jwksKidSelect">
+              <option value="" data-builtin>Manual (use header's own kid as-is)</option>
+              <option value="easyjwt-default-1" data-builtin selected>Default (easyjwt-default-1)</option>
+            </select>
           </label>
-        </div>
-        <div id="fetchKidRow" class="hidden">
-          <button id="fetchKidBtn" type="button" class="secondary-btn">Fetch kid from URL</button>
-          <select id="fetchedKidSelect" class="hidden"></select>
           <p id="fetchKidStatus" class="hint"></p>
         </div>
 

