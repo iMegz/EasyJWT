@@ -276,6 +276,17 @@
           <label>JWKS URL (optional) <input id="jwksUrl" type="text" placeholder="Leave blank for EasyJWT's hosted key, or paste your own URL (e.g. exploit server)"></label>
         </div>
 
+        <div id="jwksKidField" class="field-row hidden">
+          <label>kid to claim (optional)
+            <input id="jwksKid" type="text" placeholder="Auto: easyjwt-default-1, unless you fetch or type one">
+          </label>
+        </div>
+        <div id="fetchKidRow" class="hidden">
+          <button id="fetchKidBtn" type="button" class="secondary-btn">Fetch kid from URL</button>
+          <select id="fetchedKidSelect" class="hidden"></select>
+          <p id="fetchKidStatus" class="hint"></p>
+        </div>
+
         <button id="exploitBtn" class="primary-btn">Run exploit</button>
 
         <div id="exploitTokenBox" class="result-box found hidden">

