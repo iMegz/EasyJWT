@@ -426,7 +426,7 @@ const exploitDescriptions = {
   p: "Tries a malformed ECDSA signature value that some vulnerable libraries incorrectly accept as valid.",
   k: "Signs the token with HMAC using the provided RSA/EC public key as the secret, exploits servers that use the same key for both verifying RS/ES tokens and HMAC tokens.",
   i: "Embeds a JWKS directly in the token header (jwk claim) pointing to attacker-controlled key material.",
-  s: "Points the token's jku header at a JWKS URL the server may fetch and trust. Leave the URL blank to self-sign with EasyJWT's built-in default key, always hosted at /jwks.json, or give your own URL if you're hosting your own key.",
+  s: "Points the token's jku header at a JWKS URL the server may fetch and trust, always signed with EasyJWT's built-in default key. Leave the URL blank to use EasyJWT's own hosted /jwks.json, or paste your own URL (e.g. a lab's exploit server) if the target can't reach that domain, just host the same key there (copy it from /jwks.json).",
 };
 
 const exploitCode = document.getElementById("exploitCode");
