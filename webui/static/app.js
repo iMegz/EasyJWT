@@ -71,7 +71,14 @@ function resetDerivedState() {
   document.getElementById("decodeHeader").textContent = "";
   document.getElementById("decodePayload").textContent = "";
   document.getElementById("decodeSignature").textContent = "";
-  document.querySelectorAll(".copy-btn").forEach((b) => b.classList.add("hidden"));
+  // Only these three start hidden and get re-shown by showCopyBtn() once
+  // Decode runs again. The Crack/Forge/Exploit copy buttons are never
+  // hidden to begin with (they just ride along with their result box's
+  // own visibility), so hiding them here via the shared .copy-btn class
+  // would strand them hidden forever since nothing ever un-hides them.
+  ["decodeHeader", "decodePayload", "decodeSignature"].forEach((id) => {
+    document.querySelectorAll(`.copy-btn[data-copy-target="${id}"]`).forEach((b) => b.classList.add("hidden"));
+  });
 
   document.getElementById("crackFoundBox").classList.add("hidden");
   document.getElementById("crackNotFoundBox").classList.add("hidden");
