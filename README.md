@@ -17,24 +17,24 @@ This toolkit is for legal use only: your own applications, CTFs, authorized labs
 - `docker-compose.yml`, for local use: starts the image with the wordlists folder and a persistent config volume mounted.
 - `webui/`, the Flask app, HTML, CSS and JS.
 - `wordlists/`, the built-in wordlist(s) used automatically for cracking. These are baked into the image and never listed or shown to users of the web UI, they just see "Built-in wordlist" as a label in the results.
-- `setup.bat` / `start.bat` / `shutdown.bat`, Windows helpers so anyone who clones this repo can run it locally with a double click instead of typing Docker commands.
+- `start.bat` / `shutdown.bat`, Windows helpers so anyone who clones this repo can run it locally with a double click instead of typing Docker commands. `setup.bat` still exists and just runs `start.bat` for anyone used to the old two-step flow.
 
 ## Running locally (Windows + Docker Desktop)
 
-1. Double click `setup.bat`, it checks Docker, builds the image, and makes sure the wordlists folder exists.
-2. Double click `start.bat`, it starts the container and opens `http://localhost:5000` in your browser.
-3. Double click `shutdown.bat` when done, it stops the container without removing it.
+1. Double click `start.bat`. Every time, it checks Docker is running, pulls the latest code if this is a git checkout, rebuilds the image (quick, Docker only rebuilds what changed), starts the container, and opens `http://localhost:5000` in your browser. No separate setup step, and no way to end up running a stale image.
+2. Double click `shutdown.bat` when done, it stops the container without removing it.
 
 Locally the web UI only binds to `127.0.0.1`, so it's reachable from your own machine only.
 
 ## Running locally (any OS, without the .bat files)
 
 ```
+git pull
 docker compose build
 docker compose up -d
 ```
 
-Then open `http://localhost:5000`. Stop it with `docker compose stop`.
+Then open `http://localhost:5000`. Stop it with `docker compose stop`. Since `webui/` and `wordlists/` are baked into the image with `COPY` rather than mounted, rerun `docker compose build` after pulling or editing code, `docker compose up -d` alone reuses whatever was last built.
 
 ## The four tabs
 
