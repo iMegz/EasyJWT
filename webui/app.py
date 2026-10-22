@@ -315,7 +315,11 @@ def crack():
 
 @app.route("/api/forge", methods=["POST"])
 @auth_required
-@rate_limited
+# No @rate_limited here: this route only does PyJWT/base64 work in-process,
+# no jwt_tool subprocess, so it isn't the thing the rate limit protects.
+# The guided Exploits flow calls this and then /api/exploit back to back,
+# and sharing a limiter with that call would otherwise block the exploit
+# call a few seconds after every forge.
 def forge():
     data = request.json
     header_json = data.get("header_json", "").strip()
