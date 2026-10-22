@@ -110,7 +110,7 @@ function resetDerivedState() {
   document.getElementById("fetchedKidSelect").innerHTML = "";
   document.getElementById("fetchKidStatus").textContent = "";
   document.getElementById("exploitOutput").textContent = "";
-  document.getElementById("exploitTokenBox").classList.add("hidden");
+  document.getElementById("exploitResults").innerHTML = "";
 }
 
 // Fires on blur after an edit (paste-then-click-away, paste-then-switch-tab),
@@ -186,6 +186,36 @@ function extractSecret(text) {
     || text.match(/(?:secret|key)[^\n]*?found[^\n]*?[:="]\s*["']?([^\s"'*]{1,200})["']?/i)
     || text.match(/found[^\n]*?[:="]\s*["']?([^\s"'*]{1,200})["']?/i);
   return match ? match[1] : null;
+}
+
+// Renders one or more result rows into #exploitResults, each with its own
+// copy button and "Load into Decode" button. Built generic (a label is
+// optional) rather than tied to any one exploit, so a future exploit that
+// also needs several outputs at once can reuse it instead of growing its
+// own one-off markup.
+function renderExploitResults(results) {
+  const container = document.getElementById("exploitResults");
+  container.innerHTML = "";
+  results.forEach((r, i) => {
+    const tokenId = `exploitResultToken-${i}`;
+    const box = document.createElement("div");
+    box.className = "result-box found";
+    box.innerHTML = `
+      <strong>${r.label ? `Resulting token (${r.label})` : "Resulting token"}</strong>
+      <div class="panel-head">
+        <code id="${tokenId}" class="token-value"></code>
+        <button class="copy-btn" data-copy-target="${tokenId}">Copy</button>
+      </div>
+      <button type="button" class="secondary-btn exploit-use-btn">Load into Decode</button>
+    `;
+    box.querySelector(`#${tokenId}`).textContent = r.token;
+    box.querySelector(".exploit-use-btn").addEventListener("click", () => {
+      tokenEl.value = r.token;
+      switchTab("decode");
+      document.getElementById("decodeBtn").click();
+    });
+    container.appendChild(box);
+  });
 }
 
 function copyToClipboard(text, btn) {
@@ -489,9 +519,7 @@ document.getElementById("exploitBtn").addEventListener("click", async () => {
   if (!requireToken()) return;
   const btn = document.getElementById("exploitBtn");
   const outputEl = document.getElementById("exploitOutput");
-  const tokenBox = document.getElementById("exploitTokenBox");
-  const tokenValue = document.getElementById("exploitTokenValue");
-  tokenBox.classList.add("hidden");
+  document.getElementById("exploitResults").innerHTML = "";
   outputEl.textContent = "";
 
   const headerJson = validateJsonField(exploitHeaderEl, document.getElementById("exploitHeaderError"));
@@ -526,23 +554,19 @@ document.getElementById("exploitBtn").addEventListener("click", async () => {
       ? "Ran on the header/payload edited above, not the token exactly as pasted at the top.\n\n"
       : "") + data.output;
 
-    const newToken = extractToken(data.output, built.token);
-    if (newToken) {
-      tokenValue.textContent = newToken;
-      tokenBox.classList.remove("hidden");
+    // alg:none returns several structured results at once; every other
+    // exploit still returns one token buried in free-text output, so fall
+    // back to pulling it out with extractToken() for those. Either way it
+    // ends up rendered through the same multi-row display.
+    if (Array.isArray(data.tokens) && data.tokens.length) {
+      renderExploitResults(data.tokens);
+    } else {
+      const newToken = extractToken(data.output, built.token);
+      if (newToken) renderExploitResults([{ token: newToken }]);
     }
   } catch (err) {
     outputEl.textContent = err.message;
   } finally {
     setLoading(btn, false);
-  }
-});
-
-document.getElementById("exploitUseBtn").addEventListener("click", () => {
-  const val = document.getElementById("exploitTokenValue").textContent;
-  if (val) {
-    tokenEl.value = val;
-    switchTab("decode");
-    document.getElementById("decodeBtn").click();
   }
 });

