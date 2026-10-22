@@ -60,6 +60,69 @@ function updateTokenSegments() {
 tokenEl.addEventListener("input", updateTokenSegments);
 updateTokenSegments();
 
+// ---------- Reset stale per-token state when the token itself changes ----------
+// Decode output, a cracked secret, a chosen signing algorithm, and exploit
+// results all belong to whatever token they were produced from. If the user
+// pastes a different token, carrying those over (a secret or algorithm from
+// a previous token, in particular) is misleading, not a convenience.
+let lastTokenValue = tokenEl.value;
+
+function resetDerivedState() {
+  document.getElementById("decodeHeader").textContent = "";
+  document.getElementById("decodePayload").textContent = "";
+  document.getElementById("decodeSignature").textContent = "";
+  document.querySelectorAll(".copy-btn").forEach((b) => b.classList.add("hidden"));
+
+  document.getElementById("crackFoundBox").classList.add("hidden");
+  document.getElementById("crackNotFoundBox").classList.add("hidden");
+  document.getElementById("crackOutput").textContent = "";
+
+  forgeHeaderEl.value = "";
+  forgePayloadEl.value = "";
+  document.getElementById("forgeHeaderError").classList.add("hidden");
+  document.getElementById("forgePayloadError").classList.add("hidden");
+  signAlg.value = "";
+  signAlg.dispatchEvent(new Event("change"));
+  document.getElementById("secret").value = "";
+  document.getElementById("privateKey").value = "";
+  document.getElementById("addTypHeader").checked = false;
+  document.getElementById("forgeTokenBox").classList.add("hidden");
+  document.getElementById("forgeError").classList.add("hidden");
+
+  exploitHeaderEl.value = "";
+  exploitPayloadEl.value = "";
+  document.getElementById("exploitHeaderError").classList.add("hidden");
+  document.getElementById("exploitPayloadError").classList.add("hidden");
+  exploitLoadedHeaderJson = null;
+  exploitLoadedPayloadJson = null;
+  document.getElementById("pubkey").value = "";
+  document.getElementById("jwksUrl").value = "";
+  document.getElementById("exploitOutput").textContent = "";
+  document.getElementById("exploitTokenBox").classList.add("hidden");
+}
+
+// Fires on blur after an edit (paste-then-click-away, paste-then-switch-tab),
+// not on every keystroke, so fixing a typo mid-token doesn't wipe a secret
+// you're still in the middle of typing elsewhere.
+tokenEl.addEventListener("change", () => {
+  if (tokenEl.value !== lastTokenValue) {
+    lastTokenValue = tokenEl.value;
+    resetDerivedState();
+  }
+});
+
+document.getElementById("clearAllBtn").addEventListener("click", () => {
+  tokenEl.value = "";
+  lastTokenValue = "";
+  updateTokenSegments();
+  tokenErrorEl.classList.add("hidden");
+  resetDerivedState();
+  document.getElementById("customWordlist").value = "";
+  exploitCode.value = "a";
+  updateExploitUI();
+  switchTab("decode");
+});
+
 // ---------- Helpers ----------
 function requireToken() {
   if (!tokenEl.value.trim()) {
@@ -298,6 +361,7 @@ document.getElementById("forgeBtn").addEventListener("click", async () => {
       sign_alg: signAlg.value,
       secret: document.getElementById("secret").value,
       private_key: document.getElementById("privateKey").value,
+      add_typ: document.getElementById("addTypHeader").checked,
     });
     tokenValue.textContent = data.token;
     tokenBox.classList.remove("hidden");
@@ -319,6 +383,35 @@ document.getElementById("forgeUseBtn").addEventListener("click", () => {
 });
 
 // ---------- Exploits ----------
+const exploitHeaderEl = document.getElementById("exploitHeaderJson");
+const exploitPayloadEl = document.getElementById("exploitPayloadJson");
+let exploitLoadedHeaderJson = null;
+let exploitLoadedPayloadJson = null;
+
+async function loadTokenIntoExploitEditor() {
+  if (!tokenEl.value.trim()) return;
+  try {
+    const data = await postJSON("/api/decode", { token: tokenEl.value });
+    exploitHeaderEl.value = data.header;
+    exploitPayloadEl.value = data.payload;
+    exploitLoadedHeaderJson = data.header;
+    exploitLoadedPayloadJson = data.payload;
+    document.getElementById("exploitHeaderError").classList.add("hidden");
+    document.getElementById("exploitPayloadError").classList.add("hidden");
+  } catch (err) {
+    // leave fields as-is, token might not be decodable, user can still type JSON by hand
+  }
+}
+
+document.getElementById("exploitLoadBtn").addEventListener("click", loadTokenIntoExploitEditor);
+
+// Auto-populate the first time the Exploits tab is opened, if it's still empty.
+document.querySelector('.tab-btn[data-tab="exploits"]').addEventListener("click", () => {
+  if (!exploitHeaderEl.value.trim() && !exploitPayloadEl.value.trim()) {
+    loadTokenIntoExploitEditor();
+  }
+});
+
 const exploitDescriptions = {
   a: "Re-signs the token with alg set to none, some libraries accept unsigned tokens if the server does not reject that algorithm.",
   n: "Strips the signature entirely, exploits servers that fail to check for a missing signature.",
@@ -326,7 +419,7 @@ const exploitDescriptions = {
   p: "Tries a malformed ECDSA signature value that some vulnerable libraries incorrectly accept as valid.",
   k: "Signs the token with HMAC using the provided RSA/EC public key as the secret, exploits servers that use the same key for both verifying RS/ES tokens and HMAC tokens.",
   i: "Embeds a JWKS directly in the token header (jwk claim) pointing to attacker-controlled key material.",
-  s: "Points the token's jku/x5u header at a URL you control, hosting a JWKS the server may fetch and trust.",
+  s: "Points the token's jku header at a JWKS URL the server may fetch and trust. Leave the URL blank to self-sign with EasyJWT's built-in default key, always hosted at /jwks.json, or give your own URL if you're hosting your own key.",
 };
 
 const exploitCode = document.getElementById("exploitCode");
@@ -347,17 +440,37 @@ document.getElementById("exploitBtn").addEventListener("click", async () => {
   tokenBox.classList.add("hidden");
   outputEl.textContent = "";
 
+  const headerJson = validateJsonField(exploitHeaderEl, document.getElementById("exploitHeaderError"));
+  const payloadJson = validateJsonField(exploitPayloadEl, document.getElementById("exploitPayloadError"));
+  if (!headerJson || !payloadJson) return;
+
   setLoading(btn, true);
   try {
+    // Build a token from whatever is in the editor above (your edits if you
+    // made any, or exactly what was loaded otherwise), then run the chosen
+    // exploit on that. The exploit always re-signs the token itself, so the
+    // placeholder signature from this build step never matters.
+    const built = await postJSON("/api/forge", {
+      header_json: headerJson,
+      payload_json: payloadJson,
+      sign_alg: "",
+    });
+
+    const edited = headerJson.trim() !== (exploitLoadedHeaderJson || "").trim()
+      || payloadJson.trim() !== (exploitLoadedPayloadJson || "").trim();
+
     const data = await postJSON("/api/exploit", {
-      token: tokenEl.value,
+      token: built.token,
       code: exploitCode.value,
       pubkey: document.getElementById("pubkey").value,
       jwks_url: document.getElementById("jwksUrl").value,
     });
-    outputEl.textContent = data.output;
 
-    const newToken = extractToken(data.output, tokenEl.value.trim());
+    outputEl.textContent = (edited
+      ? "Ran on the header/payload edited above, not the token exactly as pasted at the top.\n\n"
+      : "") + data.output;
+
+    const newToken = extractToken(data.output, built.token);
     if (newToken) {
       tokenValue.textContent = newToken;
       tokenBox.classList.remove("hidden");

