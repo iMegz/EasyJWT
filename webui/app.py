@@ -1,4 +1,6 @@
 import base64
+import hashlib
+import hmac
 import re
 import jwt
 import glob
@@ -114,6 +116,39 @@ def b64url_decode(segment):
 
 def b64url_encode(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+_HMAC_HASHFUNCS = {"hs256": hashlib.sha256, "hs384": hashlib.sha384, "hs512": hashlib.sha512}
+
+
+def encode_hmac_allow_empty(payload, header, secret, alg):
+    """Same job as jwt.encode(), but PyJWT hard-refuses an empty HMAC key
+    ("HMAC key must not be empty"), while signing with one is itself a
+    real, deliberate attack: a kid header path-traversal pointing at a
+    predictable empty file (classically /dev/null) means the server's own
+    "secret" IS an empty string, and the only way to forge a matching
+    token is to sign with one too. Build the token by hand in that case."""
+    if secret:
+        return jwt.encode(payload, secret, algorithm=alg.upper(), headers=header)
+    hashfunc = _HMAC_HASHFUNCS.get(alg.lower())
+    if hashfunc is None:
+        raise ValueError(f"Unsupported HMAC algorithm: {alg}")
+    header = dict(header)
+    # PyJWT's encode() auto-adds "typ": "JWT" whenever the header has no
+    # typ key at all; replicate that here so add_typ behaves the same way
+    # whether or not the secret happens to be empty. A header that already
+    # has typ set to None was explicitly suppressed (see /api/forge above)
+    # and json.dumps() won't drop that key on its own like PyJWT does, so
+    # strip None-valued keys after this, not before.
+    if "typ" not in header:
+        header["typ"] = "JWT"
+    header = {k: v for k, v in header.items() if v is not None}
+    header["alg"] = alg.upper()
+    header_b64 = b64url_encode(json.dumps(header, separators=(",", ":")).encode())
+    payload_b64 = b64url_encode(json.dumps(payload, separators=(",", ":")).encode())
+    signing_input = f"{header_b64}.{payload_b64}".encode()
+    signature = hmac.new(b"", signing_input, hashfunc).digest()
+    return f"{header_b64}.{payload_b64}.{b64url_encode(signature)}"
 
 
 ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
@@ -355,8 +390,11 @@ def forge():
             payload_b64 = b64url_encode(json.dumps(payload, separators=(",", ":")).encode())
             token = f"{header_b64}.{payload_b64}."
         elif sign_alg.startswith("hs"):
-            if not secret:
-                return jsonify({"error": "HMAC signing needs a secret"}), 400
+            # An empty secret is deliberately allowed, not just tolerated:
+            # signing with "" is itself a real attack (a predictable file
+            # such as /dev/null read via a kid path-traversal header has
+            # empty contents, so the forged token needs an empty-string
+            # HMAC key to match it).
             # PyJWT's encode() silently injects "typ": "JWT" into the header
             # whenever the header dict has no "typ" key at all. Explicitly
             # setting it to None (falsy) tells PyJWT to leave it out, so the
@@ -364,7 +402,7 @@ def forge():
             # opted in to the default via add_typ.
             if "typ" not in header and not add_typ:
                 header["typ"] = None
-            token = jwt.encode(payload, secret, algorithm=sign_alg.upper(), headers=header)
+            token = encode_hmac_allow_empty(payload, header, secret, sign_alg)
         else:
             if not private_key:
                 return jsonify({"error": "This algorithm needs a private key"}), 400
