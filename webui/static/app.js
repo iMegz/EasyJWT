@@ -84,6 +84,15 @@ function resetDerivedState() {
   document.getElementById("crackNotFoundBox").classList.add("hidden");
   document.getElementById("crackOutput").textContent = "";
 
+  document.getElementById("recoverToken1").value = "";
+  document.getElementById("recoverToken2").value = "";
+  document.getElementById("recoverPubkeyStatus").textContent = "";
+  document.getElementById("recoverSize1024").checked = false;
+  document.getElementById("recoverSize2048").checked = true;
+  document.getElementById("recoverSize3072").checked = false;
+  document.getElementById("recoverSize4096").checked = false;
+  document.getElementById("recoverPubkeyFoundBox").classList.add("hidden");
+
   forgeHeaderEl.value = "";
   forgePayloadEl.value = "";
   document.getElementById("forgeHeaderError").classList.add("hidden");
@@ -105,13 +114,6 @@ function resetDerivedState() {
   document.getElementById("pubkey").value = "";
   document.getElementById("pubkeyUrl").value = "";
   document.getElementById("fetchPubkeyStatus").textContent = "";
-  document.getElementById("recoverToken1").value = "";
-  document.getElementById("recoverToken2").value = "";
-  document.getElementById("recoverPubkeyStatus").textContent = "";
-  document.getElementById("recoverSize1024").checked = false;
-  document.getElementById("recoverSize2048").checked = true;
-  document.getElementById("recoverSize3072").checked = false;
-  document.getElementById("recoverSize4096").checked = false;
   document.getElementById("kidPath").value = "";
   document.getElementById("jwksUrl").value = "";
   resetJwksKidSelect();
@@ -467,7 +469,7 @@ const exploitDescriptions = {
   n: "Strips the signature entirely, exploits servers that fail to check for a missing signature.",
   b: "Tests whether an empty string is accepted as a valid HMAC secret.",
   p: "Tries a malformed ECDSA signature value that some vulnerable libraries incorrectly accept as valid.",
-  k: "Signs the token with HMAC using the provided RSA/EC public key as the secret, exploits servers that use the same key for both verifying RS/ES tokens and HMAC tokens. No key exposed anywhere? Paste a URL to fetch it, or recover it from two tokens below (RSA only).",
+  k: "Signs the token with HMAC using the provided RSA/EC public key as the secret, exploits servers that use the same key for both verifying RS/ES tokens and HMAC tokens. No key exposed anywhere? Paste a URL to fetch it, or head to the Crack tab to recover it from two tokens (RSA only).",
   i: "Embeds a JWKS directly in the token header (jwk claim) pointing to attacker-controlled key material.",
   s: "Points the token's jku header at a JWKS URL the server may fetch and trust, always signed with EasyJWT's built-in default key. Leave the URL blank to use EasyJWT's own hosted /jwks.json, or paste your own URL (e.g. a lab's exploit server) if the target can't reach that domain, just host the same key there (copy it from /jwks.json).",
   t: "Points the kid header at a path on the server's own filesystem, betting it gets read as the HMAC key, then signs with HS256 using an empty-string secret, matching a predictable empty file like /dev/null. Try other paths if the default doesn't work.",
@@ -550,10 +552,13 @@ document.getElementById("pubkeyUrl").addEventListener("change", async () => {
   }
 });
 
-// ---------- Key confusion: recover the public key from two tokens ----------
-// For when the key isn't exposed anywhere at all. Genuinely slow (a real
-// factorization step per key size, seconds to over a minute each), so this
-// is a deliberate click, not an auto-fetch-on-blur like the URL field above.
+// ---------- Crack: recover an RSA public key from two tokens ----------
+// For when the key isn't exposed anywhere at all (no JWKS, no cert). Lives
+// in Crack alongside secret-cracking since both are "find the hidden key
+// material", feeding Exploits' Key confusion the same way a cracked secret
+// feeds Forge. Genuinely slow (a real factorization step per key size,
+// seconds to over a minute each), so this is a deliberate click, not an
+// auto-fetch-on-blur like the URL field in Key confusion.
 document.getElementById("recoverPubkeyBtn").addEventListener("click", async () => {
   const btn = document.getElementById("recoverPubkeyBtn");
   const statusEl = document.getElementById("recoverPubkeyStatus");
@@ -575,18 +580,30 @@ document.getElementById("recoverPubkeyBtn").addEventListener("click", async () =
     return;
   }
 
+  document.getElementById("recoverPubkeyFoundBox").classList.add("hidden");
   setLoading(btn, true, "Deriving...");
   statusEl.textContent = `Working on ${sizeBytes.length} key size${sizeBytes.length > 1 ? "s" : ""}, `
     + "this can take anywhere from several seconds to over a minute per size. "
     + "The page will be unresponsive while it runs.";
   try {
     const data = await postJSON("/api/recover-pubkey", { token1, token2, key_sizes: sizeBytes });
-    document.getElementById("pubkey").value = data.pem;
+    document.getElementById("recoverPubkeyValue").textContent = data.pem;
+    document.getElementById("recoverPubkeyFoundBox").classList.remove("hidden");
     statusEl.textContent = data.note;
   } catch (err) {
     statusEl.textContent = err.message;
   } finally {
     setLoading(btn, false);
+  }
+});
+
+document.getElementById("recoverPubkeyUseBtn").addEventListener("click", () => {
+  const pem = document.getElementById("recoverPubkeyValue").textContent;
+  if (pem) {
+    switchTab("exploits");
+    exploitCode.value = "k";
+    updateExploitUI();
+    document.getElementById("pubkey").value = pem;
   }
 });
 updateExploitUI();

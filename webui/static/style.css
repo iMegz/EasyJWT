@@ -490,24 +490,10 @@ details.raw-output summary:hover {
   color: var(--text);
 }
 
-#recoverPubkeyDetails {
-  margin-top: 1rem;
+#crack h3 {
+  margin-top: 1.5rem;
   border-top: 1px solid var(--panel-border);
-  padding-top: 0.8rem;
-}
-
-#recoverPubkeyDetails summary {
-  cursor: pointer;
-  color: var(--text-dim);
-  font-size: 0.82rem;
-}
-
-#recoverPubkeyDetails summary:hover {
-  color: var(--text);
-}
-
-#recoverPubkeyDetails label textarea {
-  margin-top: 0.3rem;
+  padding-top: 1rem;
 }
 
 .checkbox-row {
