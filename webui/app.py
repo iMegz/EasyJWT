@@ -618,7 +618,6 @@ def recover_pubkey():
     data = request.json or {}
     token1 = data.get("token1", "").strip()
     token2 = data.get("token2", "").strip()
-    key_sizes = data.get("key_sizes") or [256]  # bytes; 256 = 2048-bit, by far the most common
 
     if not token1 or not token2:
         return jsonify({"error": "Both tokens are required"}), 400
@@ -641,14 +640,18 @@ def recover_pubkey():
             )
         signing_input = f"{parts[0]}.{parts[1]}".encode()
         try:
-            sig = int.from_bytes(b64url_decode(parts[2]), "big")
+            sig_bytes = b64url_decode(parts[2])
         except Exception as exc:
             raise ValueError(f"{label}: could not decode signature: {exc}")
-        return alg, signing_input, sig
+        # RSASSA-PKCS1-v1_5 (RFC 8017 8.2.1, step 4, I2OSP) always emits a
+        # signature exactly as many bytes as the modulus itself, zero-padded
+        # on the left if needed. So the key size isn't a guess, it's sitting
+        # right here, which is what lets this skip trying multiple sizes.
+        return alg, signing_input, int.from_bytes(sig_bytes, "big"), len(sig_bytes)
 
     try:
-        alg1, si1, sig1 = split_token(token1, "Token 1")
-        alg2, si2, sig2 = split_token(token2, "Token 2")
+        alg1, si1, sig1, key_bytes1 = split_token(token1, "Token 1")
+        alg2, si2, sig2, key_bytes2 = split_token(token2, "Token 2")
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -656,52 +659,60 @@ def recover_pubkey():
         return jsonify({"error": f"Token 1 is {alg1} but Token 2 is {alg2}, both need the same algorithm"}), 400
     if sig1 == sig2:
         return jsonify({"error": "Those two tokens have the same signature, they need genuinely different signed content"}), 400
+    if key_bytes1 != key_bytes2:
+        return jsonify({
+            "error": f"Token 1's signature is {key_bytes1} bytes but Token 2's is {key_bytes2}. A signature is "
+                     "always exactly the key's own byte length, so these two can't be from the same RSA key."
+        }), 400
 
     hash_name = _ALG_TO_HASH[alg1]
+    key_bytes = key_bytes1
     e = 65537  # the near-universal default exponent; not configurable here
     mpz = gmpy2.mpz
     s1e = mpz(sig1) ** e  # exact, non-modular power: the whole trick needs this
     s2e = mpz(sig2) ** e
 
-    tried_bits = []
-    for key_bytes in key_sizes:
-        m1 = _pkcs1v15_padded_int(si1, hash_name, key_bytes)
-        m2 = _pkcs1v15_padded_int(si2, hash_name, key_bytes)
-        if m1 is None or m2 is None:
-            continue
-        tried_bits.append(key_bytes * 8)
+    m1 = _pkcs1v15_padded_int(si1, hash_name, key_bytes)
+    m2 = _pkcs1v15_padded_int(si2, hash_name, key_bytes)
+    if m1 is None or m2 is None:
+        return jsonify({
+            "error": f"A {key_bytes * 8}-bit key is too small to fit a {hash_name} digest with "
+                     "PKCS#1 v1.5 padding, these tokens don't look genuine."
+        }), 400
 
-        g = gmpy2.gcd(s1e - mpz(m1), s2e - mpz(m2))
-        if g == 0:
-            continue
-        n_candidate = g
+    expected_bits = key_bytes * 8
+    g = gmpy2.gcd(s1e - mpz(m1), s2e - mpz(m2))
+    n_candidate = g
+    if n_candidate != 0:
         for small in (2, 3, 5, 7, 11, 13, 17, 19, 23):
             while n_candidate % small == 0:
                 n_candidate //= small
-        expected_bits = key_bytes * 8
-        if abs(int(n_candidate).bit_length() - expected_bits) > 8:
-            continue
 
-        n_candidate = int(n_candidate)
-        # Sanity-check it actually verifies BOTH signatures before trusting it,
-        # rather than handing back a GCD artifact that happens to be the
-        # right size but isn't really the modulus.
-        if pow(sig1, e, n_candidate) == m1 % n_candidate and pow(sig2, e, n_candidate) == m2 % n_candidate:
-            try:
-                pem = _rsa_numbers_to_pem(n_candidate, e)
-            except Exception as exc:
-                return jsonify({"error": f"Recovered a modulus but couldn't turn it into a PEM: {exc}"}), 400
-            return jsonify({
-                "pem": pem,
-                "note": f"Recovered the {expected_bits}-bit RSA public key from these two tokens "
-                        f"(e={e}), verified against both signatures.",
-            })
+    if n_candidate == 0 or abs(int(n_candidate).bit_length() - expected_bits) > 8:
+        return jsonify({
+            "error": f"Couldn't recover a {expected_bits}-bit key from these two tokens. Either they weren't "
+                     "signed with the same RSA key, or the key uses a different exponent than 65537."
+        }), 400
 
-    sizes_desc = ", ".join(f"{b}-bit" for b in tried_bits) if tried_bits else "none (nothing selected)"
+    n_candidate = int(n_candidate)
+    # Sanity-check it actually verifies BOTH signatures before trusting it,
+    # rather than handing back a GCD artifact that happens to be the right
+    # size but isn't really the modulus.
+    if pow(sig1, e, n_candidate) == m1 % n_candidate and pow(sig2, e, n_candidate) == m2 % n_candidate:
+        try:
+            pem = _rsa_numbers_to_pem(n_candidate, e)
+        except Exception as exc:
+            return jsonify({"error": f"Recovered a modulus but couldn't turn it into a PEM: {exc}"}), 400
+        return jsonify({
+            "pem": pem,
+            "note": f"Recovered the {expected_bits}-bit RSA public key from these two tokens "
+                    f"(e={e}), verified against both signatures.",
+        })
+
     return jsonify({
-        "error": f"Couldn't recover a key at {sizes_desc}. Either these two tokens weren't signed "
-                 "with the same RSA key, the key uses a different exponent than 65537, or it's a "
-                 "key size not tried here, select more sizes and try again."
+        "error": f"The GCD produced a {expected_bits}-bit candidate, but it didn't verify against "
+                 "both signatures. These two tokens probably weren't signed with the same RSA key, "
+                 "or the key uses a different exponent than 65537."
     }), 400
 
 
@@ -915,4 +926,12 @@ def exploit():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    # threaded=True: without it this dev server handles one request at a
+    # time, full stop. A single slow request (a crack run, a key recovery)
+    # then freezes the ENTIRE app for everyone, including you in another
+    # tab, which looks exactly like the service going down even though
+    # nothing crashed. The only shared mutable state across requests is the
+    # rate limiter's plain dict (_last_request), and a race there just
+    # means a rate-limit check is occasionally off by a request, not a
+    # correctness or safety issue.
+    app.run(host="0.0.0.0", port=port, threaded=True)

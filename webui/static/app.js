@@ -87,10 +87,6 @@ function resetDerivedState() {
   document.getElementById("recoverToken1").value = "";
   document.getElementById("recoverToken2").value = "";
   document.getElementById("recoverPubkeyStatus").textContent = "";
-  document.getElementById("recoverSize1024").checked = false;
-  document.getElementById("recoverSize2048").checked = true;
-  document.getElementById("recoverSize3072").checked = false;
-  document.getElementById("recoverSize4096").checked = false;
   document.getElementById("recoverPubkeyFoundBox").classList.add("hidden");
 
   forgeHeaderEl.value = "";
@@ -594,23 +590,15 @@ document.getElementById("recoverPubkeyBtn").addEventListener("click", async () =
     return;
   }
 
-  const sizeBytes = [];
-  if (document.getElementById("recoverSize1024").checked) sizeBytes.push(128);
-  if (document.getElementById("recoverSize2048").checked) sizeBytes.push(256);
-  if (document.getElementById("recoverSize3072").checked) sizeBytes.push(384);
-  if (document.getElementById("recoverSize4096").checked) sizeBytes.push(512);
-  if (!sizeBytes.length) {
-    statusEl.textContent = "Pick at least one key size to try.";
-    return;
-  }
-
   document.getElementById("recoverPubkeyFoundBox").classList.add("hidden");
   setLoading(btn, true, "Deriving...");
-  statusEl.textContent = `Working on ${sizeBytes.length} key size${sizeBytes.length > 1 ? "s" : ""}, `
-    + "this can take anywhere from several seconds to over a minute per size. "
+  // Key size comes straight from the signatures themselves now (a
+  // signature is always exactly the key's own byte length), so this is one
+  // computation, not several, typically several seconds to under a minute.
+  statusEl.textContent = "Working on it, this can take several seconds to under a minute. "
     + "The page will be unresponsive while it runs.";
   try {
-    const data = await postJSON("/api/recover-pubkey", { token1, token2, key_sizes: sizeBytes });
+    const data = await postJSON("/api/recover-pubkey", { token1, token2 });
     document.getElementById("recoverPubkeyValue").textContent = data.pem;
     document.getElementById("recoverPubkeyFoundBox").classList.remove("hidden");
     statusEl.textContent = data.note;
