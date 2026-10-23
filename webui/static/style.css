@@ -273,6 +273,23 @@ select {
   display: none;
 }
 
+/* .field-row is a flex row by default, which is right for laying two
+   short fields side by side. A couple of fields (pubkeyField, jwksKidField)
+   pack a label plus a status line, or a label plus a button plus a status
+   line plus another label, into one .field-row; as a row those all get
+   squeezed into equal-width slices instead of stacking, so the URL input
+   ends up a sliver instead of full width. .stacked switches those specific
+   ones to a normal top-to-bottom column, each child taking the full width. */
+.field-row.stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+
+.field-row.stacked #convertPubkeyBtn {
+  align-self: flex-start;
+}
+
 #fetchKidStatus {
   margin: 0.3rem 0 0;
 }

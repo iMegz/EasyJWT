@@ -300,13 +300,14 @@
           </label>
         </div>
 
-        <div id="pubkeyField" class="field-row hidden">
+        <div id="pubkeyField" class="field-row stacked hidden">
           <label>Public key URL (optional)
-            <input id="pubkeyUrl" type="text" placeholder="e.g. the target's /jwks.json, fills in the PEM below automatically">
+            <input id="pubkeyUrl" type="text" placeholder="e.g. the target's /jwks.json">
           </label>
+          <button id="convertPubkeyBtn" type="button" class="secondary-btn">Convert to PEM</button>
           <p id="fetchPubkeyStatus" class="hint"></p>
           <label>Public key (PEM)
-            <textarea id="pubkey" rows="4" placeholder="-----BEGIN PUBLIC KEY-----, or paste a URL above instead"></textarea>
+            <textarea id="pubkey" rows="4" placeholder="-----BEGIN PUBLIC KEY-----, or paste a URL above and click Convert to PEM"></textarea>
           </label>
         </div>
 
@@ -320,7 +321,7 @@
           <label>JWKS URL (optional) <input id="jwksUrl" type="text" placeholder="Leave blank for EasyJWT's hosted key, or paste your own URL (e.g. exploit server)"></label>
         </div>
 
-        <div id="jwksKidField" class="field-row hidden">
+        <div id="jwksKidField" class="field-row stacked hidden">
           <label>kid to claim
             <select id="jwksKidSelect">
               <option value="" data-builtin>Manual (use header's own kid as-is)</option>

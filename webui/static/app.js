@@ -530,25 +530,49 @@ async function fetchJwksKidsForSelect() {
 // every keystroke, same reasoning as the shared token field's own listener.
 document.getElementById("jwksUrl").addEventListener("change", fetchJwksKidsForSelect);
 
-// ---------- Key confusion: build the PEM from a URL automatically ----------
+// ---------- Key confusion: build the PEM from a URL ----------
 // Accepts a PEM served directly, a single JWK, or a full JWKS, same as
 // /api/fetch-pubkey handles. Fills the PEM textarea in place, which stays
 // a perfectly good manual fallback: paste a URL above, or skip it and
-// paste a PEM below yourself, either way works.
-document.getElementById("pubkeyUrl").addEventListener("change", async () => {
-  const url = document.getElementById("pubkeyUrl").value.trim();
+// paste a PEM below yourself, either way works. Shared by three triggers:
+// blurring the URL field, clicking "Convert to PEM" explicitly, and
+// Run exploit itself when a URL is there but the PEM box isn't filled yet.
+// Returns true on success, false on failure (status line already has the
+// reason either way, callers just need to know whether to keep going).
+async function fetchAndFillPubkey(url) {
   const statusEl = document.getElementById("fetchPubkeyStatus");
   if (!url) {
     statusEl.textContent = "";
-    return;
+    return false;
   }
   statusEl.textContent = "Fetching key from that URL...";
   try {
     const data = await postJSON("/api/fetch-pubkey", { url });
     document.getElementById("pubkey").value = data.pem;
     statusEl.textContent = data.note;
+    return true;
   } catch (err) {
     statusEl.textContent = err.message;
+    return false;
+  }
+}
+
+document.getElementById("pubkeyUrl").addEventListener("change", () => {
+  fetchAndFillPubkey(document.getElementById("pubkeyUrl").value.trim());
+});
+
+document.getElementById("convertPubkeyBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("convertPubkeyBtn");
+  const url = document.getElementById("pubkeyUrl").value.trim();
+  if (!url) {
+    document.getElementById("fetchPubkeyStatus").textContent = "Paste a URL above first.";
+    return;
+  }
+  setLoading(btn, true, "Converting...");
+  try {
+    await fetchAndFillPubkey(url);
+  } finally {
+    setLoading(btn, false);
   }
 });
 
@@ -618,6 +642,25 @@ document.getElementById("exploitBtn").addEventListener("click", async () => {
   const headerJson = validateJsonField(exploitHeaderEl, document.getElementById("exploitHeaderError"));
   const payloadJson = validateJsonField(exploitPayloadEl, document.getElementById("exploitPayloadError"));
   if (!headerJson || !payloadJson) return;
+
+  // Key confusion: if there's a URL but no PEM yet (pasted the URL and went
+  // straight for Run exploit instead of blurring or hitting Convert to PEM
+  // first), convert it now rather than failing and making you press Run a
+  // second time. An existing PEM always wins, this never overwrites one you
+  // already have, whether fetched, recovered, or pasted by hand.
+  if (exploitCode.value === "k") {
+    const pubkeyEl = document.getElementById("pubkey");
+    const url = document.getElementById("pubkeyUrl").value.trim();
+    if (!pubkeyEl.value.trim() && url) {
+      setLoading(btn, true, "Converting key...");
+      const ok = await fetchAndFillPubkey(url);
+      setLoading(btn, false);
+      if (!ok) {
+        outputEl.textContent = document.getElementById("fetchPubkeyStatus").textContent;
+        return;
+      }
+    }
+  }
 
   setLoading(btn, true);
   try {
