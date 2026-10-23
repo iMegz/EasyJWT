@@ -282,6 +282,25 @@
           <label>Public key (PEM)
             <textarea id="pubkey" rows="4" placeholder="-----BEGIN PUBLIC KEY-----, or paste a URL above instead"></textarea>
           </label>
+
+          <details id="recoverPubkeyDetails">
+            <summary>Don't have the key at all? Recover it from two tokens</summary>
+            <p class="hint">Needs two different tokens signed with the same RS256/RS384/RS512 key (assumes the near-universal exponent 65537; won't work on PS256/384/512). This does a real factorization step and can take anywhere from several seconds to a minute or more per key size tried, the page will be unresponsive while it works.</p>
+            <label>Token 1
+              <textarea id="recoverToken1" rows="2" placeholder="A JWT signed with the key you want"></textarea>
+            </label>
+            <label>Token 2
+              <textarea id="recoverToken2" rows="2" placeholder="A second, different JWT signed with the same key"></textarea>
+            </label>
+            <div class="checkbox-row">
+              <label class="checkbox-field"><input type="checkbox" id="recoverSize1024"><span>1024-bit</span></label>
+              <label class="checkbox-field"><input type="checkbox" id="recoverSize2048" checked><span>2048-bit (most common)</span></label>
+              <label class="checkbox-field"><input type="checkbox" id="recoverSize3072"><span>3072-bit</span></label>
+              <label class="checkbox-field"><input type="checkbox" id="recoverSize4096"><span>4096-bit</span></label>
+            </div>
+            <button id="recoverPubkeyBtn" type="button" class="secondary-btn">Recover public key</button>
+            <p id="recoverPubkeyStatus" class="hint"></p>
+          </details>
         </div>
 
         <div id="kidPathField" class="field-row hidden">

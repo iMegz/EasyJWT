@@ -490,6 +490,37 @@ details.raw-output summary:hover {
   color: var(--text);
 }
 
+#recoverPubkeyDetails {
+  margin-top: 1rem;
+  border-top: 1px solid var(--panel-border);
+  padding-top: 0.8rem;
+}
+
+#recoverPubkeyDetails summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+}
+
+#recoverPubkeyDetails summary:hover {
+  color: var(--text);
+}
+
+#recoverPubkeyDetails label textarea {
+  margin-top: 0.3rem;
+}
+
+.checkbox-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 1.1rem;
+  margin: 0.4rem 0 0.8rem;
+}
+
+.checkbox-row .checkbox-field {
+  margin: 0;
+}
+
 footer {
   margin-top: 2.5rem;
   padding-top: 1rem;
