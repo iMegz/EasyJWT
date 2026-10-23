@@ -790,7 +790,18 @@ def exploit():
         if not isinstance(header, dict) or not isinstance(payload, dict):
             return jsonify({"error": "Token header/payload must be JSON objects"}), 400
 
-        default_jwks_url = f"{SITE_URL}/jwks.json"
+        # Default jku: honor an explicit SITE_URL env var if one's set (an
+        # escape hatch for when this sits behind a proxy that doesn't forward
+        # the real Host header), but otherwise derive it from how THIS
+        # request actually reached the server. On the live site that's still
+        # https://easyjwt.imegz.dev, same as before; run this locally or on a
+        # LAN and it becomes whatever address you're actually using, so the
+        # default is something a target on the same network can really fetch,
+        # instead of always pointing at the public site no matter where
+        # you're running from.
+        site_url_override = os.environ.get("SITE_URL")
+        base_url = site_url_override or request.host_url.rstrip("/")
+        default_jwks_url = f"{base_url}/jwks.json"
         target_jku = jwks_url or default_jwks_url
         # kid still signs with the same fixed key either way, this only
         # changes what the header CLAIMS its kid is. Matters when your
