@@ -103,6 +103,8 @@ function resetDerivedState() {
   exploitLoadedHeaderJson = null;
   exploitLoadedPayloadJson = null;
   document.getElementById("pubkey").value = "";
+  document.getElementById("pubkeyUrl").value = "";
+  document.getElementById("fetchPubkeyStatus").textContent = "";
   document.getElementById("kidPath").value = "";
   document.getElementById("jwksUrl").value = "";
   resetJwksKidSelect();
@@ -518,6 +520,28 @@ async function fetchJwksKidsForSelect() {
 // Fires on blur (paste-then-click-away, paste-then-switch-field), not on
 // every keystroke, same reasoning as the shared token field's own listener.
 document.getElementById("jwksUrl").addEventListener("change", fetchJwksKidsForSelect);
+
+// ---------- Key confusion: build the PEM from a URL automatically ----------
+// Accepts a PEM served directly, a single JWK, or a full JWKS, same as
+// /api/fetch-pubkey handles. Fills the PEM textarea in place, which stays
+// a perfectly good manual fallback: paste a URL above, or skip it and
+// paste a PEM below yourself, either way works.
+document.getElementById("pubkeyUrl").addEventListener("change", async () => {
+  const url = document.getElementById("pubkeyUrl").value.trim();
+  const statusEl = document.getElementById("fetchPubkeyStatus");
+  if (!url) {
+    statusEl.textContent = "";
+    return;
+  }
+  statusEl.textContent = "Fetching key from that URL...";
+  try {
+    const data = await postJSON("/api/fetch-pubkey", { url });
+    document.getElementById("pubkey").value = data.pem;
+    statusEl.textContent = data.note;
+  } catch (err) {
+    statusEl.textContent = err.message;
+  }
+});
 updateExploitUI();
 
 document.getElementById("exploitBtn").addEventListener("click", async () => {

@@ -471,6 +471,95 @@ def fetch_jwks_kids():
     return jsonify({"kids": kids})
 
 
+def _jwk_to_pem(jwk):
+    """Convert a single RSA JWK (its n/e fields) into a PEM public key,
+    the same conversion jwt.io's "JWK to PEM" box does. Only RSA is
+    supported since that's what Key confusion needs (the HMAC secret for
+    that attack is the server's RSA *public* key's bytes)."""
+    if jwk.get("kty") != "RSA":
+        raise ValueError(f'kty is "{jwk.get("kty")}", only RSA JWKs can be converted to PEM')
+    n_b64, e_b64 = jwk.get("n"), jwk.get("e")
+    if not n_b64 or not e_b64:
+        raise ValueError("JWK is missing n or e")
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives import serialization
+    n = int.from_bytes(b64url_decode(n_b64), "big")
+    e = int.from_bytes(b64url_decode(e_b64), "big")
+    public_key = rsa.RSAPublicNumbers(e, n).public_key()
+    return public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode()
+
+
+@app.route("/api/fetch-pubkey", methods=["POST"])
+@auth_required
+@rate_limited
+def fetch_pubkey():
+    # Lets Key confusion build its PEM straight from a URL instead of you
+    # copying a JWK's n/e and converting by hand. Accepts whatever the URL
+    # actually serves: a PEM directly, a single JWK, or a full JWKS (the
+    # target's own /jwks.json, say) with one or more keys in it. Fetched
+    # server-side, same reasoning as /api/fetch-jwks-kids: no CORS from the
+    # browser, and it works the same against a lab target too.
+    url = (request.json or {}).get("url", "").strip()
+    if not url:
+        return jsonify({"error": "A URL is required"}), 400
+    if not url.startswith(("http://", "https://")):
+        return jsonify({"error": "URL must start with http:// or https://"}), 400
+
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "EasyJWT"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            raw = resp.read(1024 * 1024)  # 1 MB cap, none of these are ever this big
+    except urllib.error.HTTPError as exc:
+        return jsonify({"error": f"Server responded with HTTP {exc.code}"}), 400
+    except urllib.error.URLError as exc:
+        return jsonify({"error": f"Could not reach that URL: {exc.reason}"}), 400
+    except Exception as exc:
+        return jsonify({"error": f"Could not fetch that URL: {exc}"}), 400
+
+    text = raw.decode("utf-8", errors="replace").strip()
+
+    if text.startswith("-----BEGIN"):
+        return jsonify({"pem": text, "note": "Fetched a PEM key directly from that URL."})
+
+    try:
+        body = json.loads(text)
+    except Exception as exc:
+        return jsonify({"error": f"Response wasn't a PEM key or valid JSON: {exc}"}), 400
+
+    if isinstance(body, dict) and isinstance(body.get("keys"), list):
+        keys = body["keys"]
+    elif isinstance(body, dict) and body.get("kty"):
+        keys = [body]
+    else:
+        return jsonify({
+            "error": 'Response has no usable key, expected a PEM, a single JWK, '
+                     'or a JWKS with a "keys" array'
+        }), 400
+
+    rsa_keys = [k for k in keys if isinstance(k, dict) and k.get("kty") == "RSA"]
+    if not rsa_keys:
+        return jsonify({"error": "No RSA key found there (only RSA keys can become a PEM for Key confusion)"}), 400
+
+    try:
+        pem = _jwk_to_pem(rsa_keys[0])
+    except Exception as exc:
+        return jsonify({"error": f"Could not convert that key to PEM: {exc}"}), 400
+
+    kid = rsa_keys[0].get("kid")
+    if len(rsa_keys) == 1:
+        note = f'Converted the RSA key there to PEM{f" (kid: {kid})" if kid else ""}.'
+    else:
+        note = (
+            f"Found {len(rsa_keys)} RSA keys there, converted the first one"
+            f'{f" (kid: {kid})" if kid else ""}. Edit the URL to narrow it down if that\'s the wrong one.'
+        )
+
+    return jsonify({"pem": pem, "note": note})
+
+
 @app.route("/api/exploit", methods=["POST"])
 @auth_required
 @rate_limited
