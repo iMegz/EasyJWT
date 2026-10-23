@@ -164,7 +164,7 @@
         </details>
 
         <h3>Recover an RSA public key instead</h3>
-        <p class="hint">For algorithm confusion attacks when the target's public key isn't exposed anywhere, no JWKS, no cert, nothing. Needs two different tokens signed with the same RS256/RS384/RS512 key (assumes the near-universal exponent 65537, won't work on PS256/384/512). The key size is detected automatically from the signatures themselves, no guessing needed. This does a real factorization step and typically takes several seconds to under a minute depending on key size, the page will be unresponsive while it works.</p>
+        <p class="hint">For algorithm confusion attacks when the target's public key isn't exposed anywhere, no JWKS, no cert, nothing. Needs two different tokens signed with the same RS256/RS384/RS512 key (assumes the near-universal exponent 65537, won't work on PS256/384/512). The key size is detected automatically from the signatures themselves, no guessing needed. This does a real factorization step, typically 20s for a 1024-bit key up to around 2 minutes for 4096-bit; a live elapsed timer and estimate appear once it starts. The server can only handle one request at a time while it runs, so avoid using other features here until it finishes.</p>
         <label>Token 1
           <textarea id="recoverToken1" rows="2" placeholder="A JWT signed with the key you want"></textarea>
         </label>

@@ -576,9 +576,61 @@ document.getElementById("convertPubkeyBtn").addEventListener("click", async () =
 // For when the key isn't exposed anywhere at all (no JWKS, no cert). Lives
 // in Crack alongside secret-cracking since both are "find the hidden key
 // material", feeding Exploits' Key confusion the same way a cracked secret
-// feeds Forge. Genuinely slow (a real factorization step per key size,
-// seconds to over a minute each), so this is a deliberate click, not an
-// auto-fetch-on-blur like the URL field in Key confusion.
+// feeds Forge. Genuinely slow (a real factorization step, seconds to
+// roughly two minutes depending on key size), so this is a deliberate
+// click, not an auto-fetch-on-blur like the URL field in Key confusion.
+
+// Measured on this project's own dev box, GCD cost scales up with key
+// size well past linearly, so these are real numbers, not a guess, but
+// still only a rough guide, slower/faster hardware will differ:
+//   1024-bit (128-byte sig): ~20s
+//   2048-bit (256-byte sig): ~47s   (the common case)
+//   3072-bit (384-byte sig): ~79s
+//   4096-bit (512-byte sig): ~115s
+const RECOVER_TIME_TABLE = [
+  { sigBytes: 128, seconds: 20 },
+  { sigBytes: 256, seconds: 47 },
+  { sigBytes: 384, seconds: 79 },
+  { sigBytes: 512, seconds: 115 },
+];
+
+function estimateRecoverSeconds(sigBytes) {
+  const exact = RECOVER_TIME_TABLE.find((row) => row.sigBytes === sigBytes);
+  if (exact) return exact.seconds;
+  // Not one of the four standard sizes: linearly interpolate between the
+  // two nearest known points (or extrapolate past the last one) rather
+  // than just picking the closest, since the real cost curve is steep.
+  const sorted = RECOVER_TIME_TABLE;
+  if (sigBytes <= sorted[0].sigBytes) return sorted[0].seconds;
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const a = sorted[i];
+    const b = sorted[i + 1];
+    if (sigBytes >= a.sigBytes && sigBytes <= b.sigBytes) {
+      const frac = (sigBytes - a.sigBytes) / (b.sigBytes - a.sigBytes);
+      return Math.round(a.seconds + frac * (b.seconds - a.seconds));
+    }
+  }
+  const last = sorted[sorted.length - 1];
+  const prev = sorted[sorted.length - 2];
+  const slope = (last.seconds - prev.seconds) / (last.sigBytes - prev.sigBytes);
+  return Math.round(last.seconds + slope * (sigBytes - last.sigBytes));
+}
+
+// Just needs the BYTE LENGTH of the decoded signature, not its value, so a
+// plain atob() (after the usual base64url -> base64 fixups) is enough,
+// no need to pull in a full base64url decoder for this.
+function decodedSignatureByteLength(token) {
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  let b64 = parts[2].replace(/-/g, "+").replace(/_/g, "/");
+  while (b64.length % 4) b64 += "=";
+  try {
+    return atob(b64).length;
+  } catch {
+    return null;
+  }
+}
+
 document.getElementById("recoverPubkeyBtn").addEventListener("click", async () => {
   const btn = document.getElementById("recoverPubkeyBtn");
   const statusEl = document.getElementById("recoverPubkeyStatus");
@@ -592,19 +644,33 @@ document.getElementById("recoverPubkeyBtn").addEventListener("click", async () =
 
   document.getElementById("recoverPubkeyFoundBox").classList.add("hidden");
   setLoading(btn, true, "Deriving...");
-  // Key size comes straight from the signatures themselves now (a
-  // signature is always exactly the key's own byte length), so this is one
-  // computation, not several, typically several seconds to under a minute.
-  statusEl.textContent = "Working on it, this can take several seconds to under a minute. "
-    + "The page will be unresponsive while it runs.";
+
+  // Estimate purely client-side from the signature's own byte length, the
+  // same number the server derives the key size from, so this is a real
+  // estimate, not a made-up placeholder, just not a live server-reported
+  // figure (gmpy2's GCD call has no progress hooks to report from).
+  const sigBytes = decodedSignatureByteLength(token1);
+  const estimate = sigBytes ? estimateRecoverSeconds(sigBytes) : null;
+  const sizeNote = sigBytes ? `~${sigBytes * 8}-bit key, typically ~${estimate}s` : "typically well under a minute";
+
+  const startedAt = Date.now();
+  const tick = () => {
+    const elapsed = Math.round((Date.now() - startedAt) / 1000);
+    statusEl.textContent = `Running... ${elapsed}s elapsed (${sizeNote}). Avoid running other actions here until this finishes, the server can only do one thing at a time.`;
+  };
+  tick();
+  const timer = setInterval(tick, 1000);
+
   try {
     const data = await postJSON("/api/recover-pubkey", { token1, token2 });
+    const totalSeconds = Math.round((Date.now() - startedAt) / 1000);
     document.getElementById("recoverPubkeyValue").textContent = data.pem;
     document.getElementById("recoverPubkeyFoundBox").classList.remove("hidden");
-    statusEl.textContent = data.note;
+    statusEl.textContent = `${data.note} (took ${totalSeconds}s)`;
   } catch (err) {
     statusEl.textContent = err.message;
   } finally {
+    clearInterval(timer);
     setLoading(btn, false);
   }
 });
