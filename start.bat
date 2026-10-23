@@ -49,7 +49,9 @@ if exist ".git" (
 
 echo.
 echo Building the image, this makes sure you are always running the latest version...
-echo ^(usually quick, Docker only rebuilds what actually changed^)
+echo ^(usually quick on later runs, Docker only rebuilds what actually changed. The
+echo  very first build is the exception: it compiles gmpy2 and the crypto library
+echo  from source, which can take several minutes, that is expected, not stuck^)
 docker compose build
 if errorlevel 1 (
     echo.
