@@ -137,12 +137,15 @@
       </section>
 
       <section id="crack" class="tab-panel">
-        <p class="hint">Checks the token's secret against a built-in dictionary automatically. Add your own list for this run only, nothing you upload is kept, and the built-in list stays private.</p>
-        <label class="file-label" for="customWordlist">
-          <span>Your own wordlist</span>
-          <span class="file-note">.txt, 2 MB max, optional</span>
-        </label>
-        <input id="customWordlist" type="file" accept=".txt">
+        <p class="hint">Checks the token's secret against a built-in dictionary automatically — no upload needed to start.</p>
+        <details class="raw-output">
+          <summary>Add your own wordlist (optional)</summary>
+          <label class="file-label" for="customWordlist">
+            <span>Your own wordlist</span>
+            <span class="file-note">.txt, 2 MB max, used for this run only, nothing you upload is kept, and the built-in list stays private</span>
+          </label>
+          <input id="customWordlist" type="file" accept=".txt">
+        </details>
         <button id="crackBtn" class="primary-btn">Crack</button>
 
         <div id="crackFoundBox" class="result-box found hidden">
