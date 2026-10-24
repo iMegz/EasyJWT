@@ -82,6 +82,7 @@ function resetDerivedState() {
 
   document.getElementById("crackFoundBox").classList.add("hidden");
   document.getElementById("crackNotFoundBox").classList.add("hidden");
+  document.getElementById("crackError").classList.add("hidden");
   document.getElementById("crackOutput").textContent = "";
 
   document.getElementById("recoverToken1").value = "";
@@ -178,14 +179,6 @@ async function postJSON(url, body) {
   return data;
 }
 
-// Best-effort extraction, jwt_tool's exact wording can vary by version,
-// the full raw output is always shown below for when this misses.
-function extractToken(text, excluding) {
-  const matches = text.match(/[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]*/g) || [];
-  const candidates = matches.filter((m) => m !== excluding);
-  return candidates.length ? candidates[candidates.length - 1] : null;
-}
-
 function extractSecret(text) {
   // jwt_tool's crack mode prints: [+] <secret> is the CORRECT key!
   const match = text.match(/\[\+\]\s+(.+?)\s+is the CORRECT key/i)
@@ -250,9 +243,8 @@ function showCopyBtn(id) {
 }
 
 // ---------- Decode ----------
-document.getElementById("decodeBtn").addEventListener("click", async () => {
+document.getElementById("decodeBtn").addEventListener("click", () => {
   if (!requireToken()) return;
-  const btn = document.getElementById("decodeBtn");
   const headerEl = document.getElementById("decodeHeader");
   const payloadEl = document.getElementById("decodePayload");
   const sigEl = document.getElementById("decodeSignature");
@@ -260,9 +252,8 @@ document.getElementById("decodeBtn").addEventListener("click", async () => {
   payloadEl.textContent = "";
   sigEl.textContent = "";
 
-  setLoading(btn, true);
   try {
-    const data = await postJSON("/api/decode", { token: tokenEl.value });
+    const data = decodeTokenClient(tokenEl.value);
     headerEl.textContent = data.header;
     payloadEl.textContent = data.payload;
     sigEl.textContent = data.signature || "(none)";
@@ -271,37 +262,99 @@ document.getElementById("decodeBtn").addEventListener("click", async () => {
     showCopyBtn("decodeSignature");
   } catch (err) {
     headerEl.textContent = err.message;
-  } finally {
-    setLoading(btn, false);
   }
 });
 
 // ---------- Crack ----------
+// Runs entirely in the browser: a Web Worker (crack-worker.js) HMACs each
+// wordlist candidate against the token and compares it to the token's own
+// signature, the same test jwt_tool's -C mode does. The built-in wordlist
+// is fetched once from /api/wordlist (same merged, deduped list the server
+// used to feed jwt_tool with); the browser caches it after the first run.
+function crackWithWorker(signingInput, targetSig, alg, words) {
+  return new Promise((resolve) => {
+    const worker = new Worker("/static/crack-worker.js");
+    worker.onmessage = (e) => {
+      worker.terminate();
+      resolve(e.data.found ? `[+] ${e.data.secret} is the CORRECT key!` : "[-] Key not in dictionary");
+    };
+    worker.onerror = (e) => {
+      worker.terminate();
+      resolve(`Crack failed: ${e.message}`);
+    };
+    worker.postMessage({ signingInput, targetSig, alg, words });
+  });
+}
+
 document.getElementById("crackBtn").addEventListener("click", async () => {
   if (!requireToken()) return;
   const btn = document.getElementById("crackBtn");
   const outputEl = document.getElementById("crackOutput");
+  const errorEl = document.getElementById("crackError");
   const foundBox = document.getElementById("crackFoundBox");
   const foundValue = document.getElementById("crackFoundValue");
   const notFoundBox = document.getElementById("crackNotFoundBox");
   foundBox.classList.add("hidden");
   notFoundBox.classList.add("hidden");
+  errorEl.classList.add("hidden");
   outputEl.textContent = "";
 
+  // Every early-return error below goes into this visible line, not just
+  // crackOutput: that output box sits collapsed inside "Full output" by
+  // default, so writing an error there only made it look like nothing
+  // happened at all.
+  function fail(message) {
+    errorEl.textContent = message;
+    errorEl.classList.remove("hidden");
+  }
+
+  const token = tokenEl.value.trim();
+  const parts = token.split(".");
+  if (parts.length !== 3) {
+    fail("That does not look like a JWT (expected 3 parts).");
+    return;
+  }
+
+  let header;
+  try {
+    header = JSON.parse(bytesToUtf8(b64urlToBytes(parts[0])));
+  } catch (err) {
+    fail(`Could not decode token: ${err.message}`);
+    return;
+  }
+  const alg = (header.alg || "").toUpperCase();
+  if (!["HS256", "HS384", "HS512"].includes(alg)) {
+    fail(`Algorithm is ${alg || "not set"}, not HMAC-SHA, so there's no password to crack. For RS/ES/PS tokens, try "Recover an RSA public key" below instead.`);
+    return;
+  }
+  const signingInput = `${parts[0]}.${parts[1]}`;
+  const targetSig = parts[2];
+
+  const jobs = [];
   const fileInput = document.getElementById("customWordlist");
-  const formData = new FormData();
-  formData.append("token", tokenEl.value);
   if (fileInput.files.length > 0) {
-    formData.append("wordlist", fileInput.files[0]);
+    jobs.push({ label: "Your wordlist", text: await fileInput.files[0].text() });
+  }
+  try {
+    const res = await fetch("/api/wordlist");
+    if (res.ok) jobs.push({ label: "Built-in wordlist", text: await res.text() });
+  } catch (err) {
+    // built-in wordlist just won't be tried, custom one (if any) still runs
+  }
+  if (jobs.length === 0) {
+    fail("No wordlists available, upload a custom one");
+    return;
   }
 
   setLoading(btn, true, "Cracking");
   try {
-    const res = await fetch("/api/crack", { method: "POST", body: formData });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Request failed");
+    const results = {};
+    for (const job of jobs) {
+      const words = job.text.split("\n").map((w) => w.trim()).filter(Boolean);
+      results[job.label] = await crackWithWorker(signingInput, targetSig, alg, words);
+    }
 
-    const combined = Object.entries(data.results)
+    const combined = Object.entries(results)
       .map(([name, out]) => `=== ${name} ===\n${out}`)
       .join("\n\n");
     outputEl.textContent = combined;
@@ -314,7 +367,7 @@ document.getElementById("crackBtn").addEventListener("click", async () => {
       notFoundBox.classList.remove("hidden");
     }
   } catch (err) {
-    outputEl.textContent = err.message;
+    fail(err.message);
   } finally {
     setLoading(btn, false);
   }
@@ -347,7 +400,7 @@ signAlg.addEventListener("change", () => {
 async function loadTokenIntoForge() {
   if (!tokenEl.value.trim()) return;
   try {
-    const data = await postJSON("/api/decode", { token: tokenEl.value });
+    const data = decodeTokenClient(tokenEl.value);
     forgeHeaderEl.value = data.header;
     forgePayloadEl.value = data.payload;
     document.getElementById("forgeHeaderError").classList.add("hidden");
@@ -403,15 +456,15 @@ document.getElementById("forgeBtn").addEventListener("click", async () => {
 
   setLoading(btn, true);
   try {
-    const data = await postJSON("/api/forge", {
-      header_json: headerJson,
-      payload_json: payloadJson,
-      sign_alg: signAlg.value,
+    const token = await forgeToken({
+      headerJson,
+      payloadJson,
+      signAlg: signAlg.value,
       secret: document.getElementById("secret").value,
-      private_key: document.getElementById("privateKey").value,
-      add_typ: document.getElementById("addTypHeader").checked,
+      privateKeyPem: document.getElementById("privateKey").value,
+      addTyp: document.getElementById("addTypHeader").checked,
     });
-    tokenValue.textContent = data.token;
+    tokenValue.textContent = token;
     tokenBox.classList.remove("hidden");
   } catch (err) {
     forgeErrorEl.textContent = err.message;
@@ -439,7 +492,7 @@ let exploitLoadedPayloadJson = null;
 async function loadTokenIntoExploitEditor() {
   if (!tokenEl.value.trim()) return;
   try {
-    const data = await postJSON("/api/decode", { token: tokenEl.value });
+    const data = decodeTokenClient(tokenEl.value);
     exploitHeaderEl.value = data.header;
     exploitPayloadEl.value = data.payload;
     exploitLoadedHeaderJson = data.header;
@@ -484,10 +537,24 @@ exploitCode.addEventListener("change", updateExploitUI);
 
 // ---------- Spoof JWKS: kid dropdown, fetched from the URL automatically ----------
 // The two built-in options (Manual, Default) are marked with data-builtin and
-// never removed; only options fetched from a URL get added/cleared around them.
+// never removed outright; only options fetched from a URL get added/cleared
+// around them. The Default option itself gets hidden (not removed) once a
+// custom URL's own kid(s) are fetched successfully, since "Default" then
+// refers to a kid that URL almost certainly doesn't actually serve, and
+// restored whenever the URL field is cleared or the fetch finds nothing.
+function defaultKidOption() {
+  return document.querySelector('#jwksKidSelect option[value="easyjwt-default-1"]');
+}
+
+function setDefaultKidVisible(visible) {
+  const opt = defaultKidOption();
+  opt.hidden = !visible;
+}
+
 function resetJwksKidSelect() {
   const selectEl = document.getElementById("jwksKidSelect");
   selectEl.querySelectorAll("option:not([data-builtin])").forEach((opt) => opt.remove());
+  setDefaultKidVisible(true);
   selectEl.value = "easyjwt-default-1";
 }
 
@@ -511,6 +578,7 @@ async function fetchJwksKidsForSelect() {
       selectEl.appendChild(opt);
     });
     if (kids.length) {
+      setDefaultKidVisible(false);
       selectEl.value = kids[0];
       statusEl.textContent = kids.length === 1
         ? `Found one key there, kid set to "${kids[0]}".`
@@ -535,22 +603,45 @@ document.getElementById("jwksUrl").addEventListener("change", fetchJwksKidsForSe
 // Run exploit itself when a URL is there but the PEM box isn't filled yet.
 // Returns true on success, false on failure (status line already has the
 // reason either way, callers just need to know whether to keep going).
+//
+// Clicking "Run exploit" blurs the URL field first, which fires its own
+// "change" listener below, starting a fetch independently of the explicit
+// check Run exploit's own handler does a moment later for the same URL.
+// Without de-duping, that's two concurrent requests to a rate-limited
+// endpoint: the second one can get a 429, which Run exploit's handler then
+// reads as "conversion failed" and bails out before ever running the
+// exploit, even though the first request succeeded and filled the PEM
+// right in front of you. Tracking the in-flight promise per URL collapses
+// any second caller onto the same request instead of firing a duplicate.
+let _pubkeyFetchUrl = null;
+let _pubkeyFetchPromise = null;
+
 async function fetchAndFillPubkey(url) {
   const statusEl = document.getElementById("fetchPubkeyStatus");
   if (!url) {
     statusEl.textContent = "";
     return false;
   }
-  statusEl.textContent = "Fetching key from that URL...";
-  try {
-    const data = await postJSON("/api/fetch-pubkey", { url });
-    document.getElementById("pubkey").value = data.pem;
-    statusEl.textContent = data.note;
-    return true;
-  } catch (err) {
-    statusEl.textContent = err.message;
-    return false;
+  if (_pubkeyFetchPromise && _pubkeyFetchUrl === url) {
+    return _pubkeyFetchPromise;
   }
+  statusEl.textContent = "Fetching key from that URL...";
+  _pubkeyFetchUrl = url;
+  _pubkeyFetchPromise = (async () => {
+    try {
+      const data = await postJSON("/api/fetch-pubkey", { url });
+      document.getElementById("pubkey").value = data.pem;
+      statusEl.textContent = data.note;
+      return true;
+    } catch (err) {
+      statusEl.textContent = err.message;
+      return false;
+    } finally {
+      _pubkeyFetchUrl = null;
+      _pubkeyFetchPromise = null;
+    }
+  })();
+  return _pubkeyFetchPromise;
 }
 
 document.getElementById("pubkeyUrl").addEventListener("change", () => {
@@ -677,12 +768,26 @@ document.getElementById("recoverPubkeyBtn").addEventListener("click", async () =
 
 document.getElementById("recoverPubkeyUseBtn").addEventListener("click", () => {
   const pem = document.getElementById("recoverPubkeyValue").textContent;
-  if (pem) {
-    switchTab("exploits");
-    exploitCode.value = "k";
-    updateExploitUI();
-    document.getElementById("pubkey").value = pem;
+  if (!pem) return;
+
+  // Also carry over one of the two tokens recovery used: Key confusion
+  // needs a token to re-sign, and recovering a key with nothing to use it
+  // on isn't the point, so hand it the same one, not just the PEM. Setting
+  // tokenEl.value directly (not via user interaction) doesn't fire the
+  // token-changed reset, which would otherwise wipe the PEM right back out
+  // the moment a token lands in the field.
+  const token1 = document.getElementById("recoverToken1").value.trim();
+  if (token1) {
+    tokenEl.value = token1;
+    lastTokenValue = token1;
+    updateTokenSegments();
   }
+
+  switchTab("exploits");
+  exploitCode.value = "k";
+  updateExploitUI();
+  document.getElementById("pubkey").value = pem;
+  loadTokenIntoExploitEditor();
 });
 updateExploitUI();
 
@@ -718,42 +823,33 @@ document.getElementById("exploitBtn").addEventListener("click", async () => {
 
   setLoading(btn, true);
   try {
-    // Build a token from whatever is in the editor above (your edits if you
-    // made any, or exactly what was loaded otherwise), then run the chosen
-    // exploit on that. The exploit always re-signs the token itself, so the
-    // placeholder signature from this build step never matters.
-    const built = await postJSON("/api/forge", {
-      header_json: headerJson,
-      payload_json: payloadJson,
-      sign_alg: "",
-    });
+    // Run the chosen exploit directly on whatever is in the editor above
+    // (your edits if you made any, or exactly what was loaded otherwise).
+    // Every exploit builds and signs its own token from scratch, so there's
+    // no placeholder token to build first the way the old server-side
+    // version needed.
+    const header = JSON.parse(headerJson);
+    const payload = JSON.parse(payloadJson);
 
     const edited = headerJson.trim() !== (exploitLoadedHeaderJson || "").trim()
       || payloadJson.trim() !== (exploitLoadedPayloadJson || "").trim();
 
-    const data = await postJSON("/api/exploit", {
-      token: built.token,
-      code: exploitCode.value,
-      pubkey: document.getElementById("pubkey").value,
-      jwks_url: document.getElementById("jwksUrl").value,
-      kid: document.getElementById("jwksKidSelect").value,
-      kid_path: document.getElementById("kidPath").value,
-      none_variants: document.getElementById("noneVariants").checked,
+    const data = await runExploit(exploitCode.value, {
+      header,
+      payload,
+      pubkeyPem: document.getElementById("pubkey").value,
+      jwksUrl: document.getElementById("jwksUrl").value,
+      kidOverride: document.getElementById("jwksKidSelect").value,
+      kidPath: document.getElementById("kidPath").value,
+      noneVariants: document.getElementById("noneVariants").checked,
     });
 
     outputEl.textContent = (edited
       ? "Ran on the header/payload edited above, not the token exactly as pasted at the top.\n\n"
       : "") + data.output;
 
-    // alg:none returns several structured results at once; every other
-    // exploit still returns one token buried in free-text output, so fall
-    // back to pulling it out with extractToken() for those. Either way it
-    // ends up rendered through the same multi-row display.
     if (Array.isArray(data.tokens) && data.tokens.length) {
       renderExploitResults(data.tokens);
-    } else {
-      const newToken = extractToken(data.output, built.token);
-      if (newToken) renderExploitResults([{ token: newToken }]);
     }
   } catch (err) {
     outputEl.textContent = err.message;

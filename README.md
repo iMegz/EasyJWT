@@ -1,6 +1,6 @@
 # EasyJWT
 
-A self-hosted web UI for ticarpi's jwt_tool. Paste a token, decode it, crack its secret, inject or forge claims, and run known JWT vulnerability exploits, all from a browser page.
+A self-hosted JWT security testing tool. Paste a token, decode it, crack its secret, inject or forge claims, and run known JWT vulnerability exploits, all from a browser page. Decode, Forge, Crack, and every Exploits-tab attack run entirely client-side in your browser; a handful of exploits are ported from ticarpi's jwt_tool for parity with its own behavior, but nothing here shells out to it anymore.
 
 **Live instance:** [easyjwt.imegz.dev](https://easyjwt.imegz.dev/)
 **Source:** [github.com/iMegz/EasyJWT](https://github.com/iMegz/EasyJWT)
@@ -13,11 +13,11 @@ This toolkit is for legal use only: your own applications, CTFs, authorized labs
 
 ## What's included
 
-- `Dockerfile`, builds the web UI on top of the jwt_tool image. It also compiles gmpy2 and the crypto library from source, those have no prebuilt wheel for this base image, so the very first build takes a few minutes longer than later ones.
-- `docker-compose.yml`, for local use: starts the image with the wordlists folder and a persistent config volume mounted.
-- `webui/`, the Flask app, HTML, CSS and JS.
-- `wordlists/`, the built-in wordlist(s) used automatically for cracking. These are baked into the image and never listed or shown to users of the web UI, they just see "Built-in wordlist" as a label in the results.
-- `start.bat` / `shutdown.bat`, Windows helpers so anyone who clones this repo can run it locally with a double click instead of typing Docker commands. `setup.bat` still exists and just runs `start.bat` for anyone used to the old two-step flow.
+- `Dockerfile`, builds the web UI on a plain Alpine Python image. It also compiles gmpy2 and the crypto library from source, those have no prebuilt wheel for this base image, so the very first build takes a few minutes longer than later ones.
+- `docker-compose.yml`, for local use: starts the image with the wordlists folder mounted.
+- `webui/`, the Flask app (now just a handful of server-side-only routes), HTML, CSS and JS.
+- `wordlists/`, the built-in wordlist(s) used automatically for cracking. These are baked into the image and fetched into the browser to crack against, but never displayed anywhere in the UI itself, users just see "Built-in wordlist" as a label in the results.
+- `start.bat` / `shutdown.bat`, Windows helpers so anyone who clones this repo can run it locally with a double click instead of typing Docker commands.
 
 ## Running locally (Windows + Docker Desktop)
 
@@ -40,10 +40,10 @@ Then open `http://localhost:5000`. Stop it with `docker compose stop`. Since `we
 
 - **Decode**, view a token's header and payload.
 - **Crack**, two ways to recover key material:
-  - Secret cracking against a wordlist, for HS256/HS384/HS512 tokens. Runs against the built-in wordlist automatically, or optionally upload your own `.txt` wordlist (2 MB max) for that run, it's used in memory and never stored or exposed, and the built-in list's contents are never shown.
+  - Secret cracking against a wordlist, for HS256/HS384/HS512 tokens. Runs entirely in your browser (a Web Worker), against the built-in wordlist automatically, or optionally your own uploaded `.txt` wordlist for that run, nothing you upload ever leaves your browser.
   - Public key recovery from two tokens, for RS256/RS384/RS512 tokens signed with the same key, when the target's public key isn't exposed anywhere (no JWKS, no cert). The key size is detected automatically from the signatures, no guessing involved. This does a real factorization step and can take anywhere from about 20 seconds (1024-bit key) to a couple of minutes (4096-bit key), with a live elapsed-time and estimate shown while it runs. The server can only handle one request at a time while this is running, so avoid using other features here until it finishes. A "Use in Key confusion" button sends the recovered key straight into the Key confusion exploit below.
 - **Forge**, inject or update a header or payload claim, then optionally sign the result with a secret (HMAC) or a private key (RSA/EC/PSS).
-- **Exploits**, run both native checks and jwt_tool's own exploits:
+- **Exploits**, all of these run entirely in your browser:
   - alg:none, with an option to also try case variants (`None`, `NONE`, etc.).
   - Null signature.
   - Blank password accepted.
@@ -55,7 +55,7 @@ Then open `http://localhost:5000`. Stop it with `docker compose stop`. Since `we
 
 ## Running fully offline
 
-Decoding, forging, cracking, and public-key recovery never touch the network. Within Exploits, Key confusion's URL-fetch and Spoof JWKS's kid auto-fetch are the only features that make an outbound request, and only if you give them a URL. Spoof JWKS's default URL no longer points at the public hosted site, it's derived from whatever address you're actually using to reach the app, so a stock local run stays offline unless you choose otherwise.
+Decoding, forging, cracking, every exploit, and public-key recovery never make an outbound request to anything other than this app itself (the first four run entirely in your browser now; public-key recovery is still computed server-side). Within Exploits, Key confusion's URL-fetch and Spoof JWKS's kid auto-fetch are the only features that reach an external target, and only if you give them a URL. Spoof JWKS's default URL no longer points at the public hosted site, it's derived from whatever address you're actually using to reach the app, so a stock local run stays offline unless you choose otherwise.
 
 ## Configuration
 
@@ -72,7 +72,7 @@ Edit or replace the `.txt` files in `wordlists/`. All `.txt` files in that folde
 
 ## Notes
 
-The web UI runs jwt_tool's own Python code under the hood for secret cracking and most exploits (null signature, blank password, psychic signature, key confusion, inline JWKS injection); alg:none, Spoof JWKS, and kid path traversal are built natively in this app instead. If jwt_tool's command line flags change in a future version, the delegated parts of the Forge and Exploits tabs may need matching updates in `webui/app.py`.
+Decode, Forge, Crack, and all eight Exploits-tab attacks run natively in `webui/static/crypto.js` (and `crack-worker.js` for Crack) in the browser, no server round trip. Five of the exploits (null signature, blank password, psychic signature, key confusion, inline JWKS injection) are ported to match jwt_tool's own exploit implementations byte-for-byte; the rest (alg:none, Spoof JWKS, kid path traversal) were always native to this app. Nothing here invokes the real jwt_tool binary anymore.
 
 ---
 
