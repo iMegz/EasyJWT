@@ -178,14 +178,6 @@ async function postJSON(url, body) {
   return data;
 }
 
-// Best-effort extraction, jwt_tool's exact wording can vary by version,
-// the full raw output is always shown below for when this misses.
-function extractToken(text, excluding) {
-  const matches = text.match(/[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]*/g) || [];
-  const candidates = matches.filter((m) => m !== excluding);
-  return candidates.length ? candidates[candidates.length - 1] : null;
-}
-
 function extractSecret(text) {
   // jwt_tool's crack mode prints: [+] <secret> is the CORRECT key!
   const match = text.match(/\[\+\]\s+(.+?)\s+is the CORRECT key/i)
@@ -250,9 +242,8 @@ function showCopyBtn(id) {
 }
 
 // ---------- Decode ----------
-document.getElementById("decodeBtn").addEventListener("click", async () => {
+document.getElementById("decodeBtn").addEventListener("click", () => {
   if (!requireToken()) return;
-  const btn = document.getElementById("decodeBtn");
   const headerEl = document.getElementById("decodeHeader");
   const payloadEl = document.getElementById("decodePayload");
   const sigEl = document.getElementById("decodeSignature");
@@ -260,9 +251,8 @@ document.getElementById("decodeBtn").addEventListener("click", async () => {
   payloadEl.textContent = "";
   sigEl.textContent = "";
 
-  setLoading(btn, true);
   try {
-    const data = await postJSON("/api/decode", { token: tokenEl.value });
+    const data = decodeTokenClient(tokenEl.value);
     headerEl.textContent = data.header;
     payloadEl.textContent = data.payload;
     sigEl.textContent = data.signature || "(none)";
@@ -271,12 +261,30 @@ document.getElementById("decodeBtn").addEventListener("click", async () => {
     showCopyBtn("decodeSignature");
   } catch (err) {
     headerEl.textContent = err.message;
-  } finally {
-    setLoading(btn, false);
   }
 });
 
 // ---------- Crack ----------
+// Runs entirely in the browser: a Web Worker (crack-worker.js) HMACs each
+// wordlist candidate against the token and compares it to the token's own
+// signature, the same test jwt_tool's -C mode does. The built-in wordlist
+// is fetched once from /api/wordlist (same merged, deduped list the server
+// used to feed jwt_tool with); the browser caches it after the first run.
+function crackWithWorker(signingInput, targetSig, alg, words) {
+  return new Promise((resolve) => {
+    const worker = new Worker("/static/crack-worker.js");
+    worker.onmessage = (e) => {
+      worker.terminate();
+      resolve(e.data.found ? `[+] ${e.data.secret} is the CORRECT key!` : "[-] Key not in dictionary");
+    };
+    worker.onerror = (e) => {
+      worker.terminate();
+      resolve(`Crack failed: ${e.message}`);
+    };
+    worker.postMessage({ signingInput, targetSig, alg, words });
+  });
+}
+
 document.getElementById("crackBtn").addEventListener("click", async () => {
   if (!requireToken()) return;
   const btn = document.getElementById("crackBtn");
@@ -288,20 +296,53 @@ document.getElementById("crackBtn").addEventListener("click", async () => {
   notFoundBox.classList.add("hidden");
   outputEl.textContent = "";
 
+  const token = tokenEl.value.trim();
+  const parts = token.split(".");
+  if (parts.length !== 3) {
+    outputEl.textContent = "That does not look like a JWT (expected 3 parts).";
+    return;
+  }
+
+  let header;
+  try {
+    header = JSON.parse(bytesToUtf8(b64urlToBytes(parts[0])));
+  } catch (err) {
+    outputEl.textContent = `Could not decode token: ${err.message}`;
+    return;
+  }
+  const alg = (header.alg || "").toUpperCase();
+  if (!["HS256", "HS384", "HS512"].includes(alg)) {
+    outputEl.textContent = "Algorithm is not HMAC-SHA - cannot test against passwords, try the Verify function.";
+    return;
+  }
+  const signingInput = `${parts[0]}.${parts[1]}`;
+  const targetSig = parts[2];
+
+  const jobs = [];
   const fileInput = document.getElementById("customWordlist");
-  const formData = new FormData();
-  formData.append("token", tokenEl.value);
   if (fileInput.files.length > 0) {
-    formData.append("wordlist", fileInput.files[0]);
+    jobs.push({ label: "Your wordlist", text: await fileInput.files[0].text() });
+  }
+  try {
+    const res = await fetch("/api/wordlist");
+    if (res.ok) jobs.push({ label: "Built-in wordlist", text: await res.text() });
+  } catch (err) {
+    // built-in wordlist just won't be tried, custom one (if any) still runs
+  }
+  if (jobs.length === 0) {
+    outputEl.textContent = "No wordlists available, upload a custom one";
+    return;
   }
 
   setLoading(btn, true, "Cracking");
   try {
-    const res = await fetch("/api/crack", { method: "POST", body: formData });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Request failed");
+    const results = {};
+    for (const job of jobs) {
+      const words = job.text.split("\n").map((w) => w.trim()).filter(Boolean);
+      results[job.label] = await crackWithWorker(signingInput, targetSig, alg, words);
+    }
 
-    const combined = Object.entries(data.results)
+    const combined = Object.entries(results)
       .map(([name, out]) => `=== ${name} ===\n${out}`)
       .join("\n\n");
     outputEl.textContent = combined;
@@ -347,7 +388,7 @@ signAlg.addEventListener("change", () => {
 async function loadTokenIntoForge() {
   if (!tokenEl.value.trim()) return;
   try {
-    const data = await postJSON("/api/decode", { token: tokenEl.value });
+    const data = decodeTokenClient(tokenEl.value);
     forgeHeaderEl.value = data.header;
     forgePayloadEl.value = data.payload;
     document.getElementById("forgeHeaderError").classList.add("hidden");
@@ -403,15 +444,15 @@ document.getElementById("forgeBtn").addEventListener("click", async () => {
 
   setLoading(btn, true);
   try {
-    const data = await postJSON("/api/forge", {
-      header_json: headerJson,
-      payload_json: payloadJson,
-      sign_alg: signAlg.value,
+    const token = await forgeToken({
+      headerJson,
+      payloadJson,
+      signAlg: signAlg.value,
       secret: document.getElementById("secret").value,
-      private_key: document.getElementById("privateKey").value,
-      add_typ: document.getElementById("addTypHeader").checked,
+      privateKeyPem: document.getElementById("privateKey").value,
+      addTyp: document.getElementById("addTypHeader").checked,
     });
-    tokenValue.textContent = data.token;
+    tokenValue.textContent = token;
     tokenBox.classList.remove("hidden");
   } catch (err) {
     forgeErrorEl.textContent = err.message;
@@ -439,7 +480,7 @@ let exploitLoadedPayloadJson = null;
 async function loadTokenIntoExploitEditor() {
   if (!tokenEl.value.trim()) return;
   try {
-    const data = await postJSON("/api/decode", { token: tokenEl.value });
+    const data = decodeTokenClient(tokenEl.value);
     exploitHeaderEl.value = data.header;
     exploitPayloadEl.value = data.payload;
     exploitLoadedHeaderJson = data.header;
@@ -718,42 +759,33 @@ document.getElementById("exploitBtn").addEventListener("click", async () => {
 
   setLoading(btn, true);
   try {
-    // Build a token from whatever is in the editor above (your edits if you
-    // made any, or exactly what was loaded otherwise), then run the chosen
-    // exploit on that. The exploit always re-signs the token itself, so the
-    // placeholder signature from this build step never matters.
-    const built = await postJSON("/api/forge", {
-      header_json: headerJson,
-      payload_json: payloadJson,
-      sign_alg: "",
-    });
+    // Run the chosen exploit directly on whatever is in the editor above
+    // (your edits if you made any, or exactly what was loaded otherwise).
+    // Every exploit builds and signs its own token from scratch, so there's
+    // no placeholder token to build first the way the old server-side
+    // version needed.
+    const header = JSON.parse(headerJson);
+    const payload = JSON.parse(payloadJson);
 
     const edited = headerJson.trim() !== (exploitLoadedHeaderJson || "").trim()
       || payloadJson.trim() !== (exploitLoadedPayloadJson || "").trim();
 
-    const data = await postJSON("/api/exploit", {
-      token: built.token,
-      code: exploitCode.value,
-      pubkey: document.getElementById("pubkey").value,
-      jwks_url: document.getElementById("jwksUrl").value,
-      kid: document.getElementById("jwksKidSelect").value,
-      kid_path: document.getElementById("kidPath").value,
-      none_variants: document.getElementById("noneVariants").checked,
+    const data = await runExploit(exploitCode.value, {
+      header,
+      payload,
+      pubkeyPem: document.getElementById("pubkey").value,
+      jwksUrl: document.getElementById("jwksUrl").value,
+      kidOverride: document.getElementById("jwksKidSelect").value,
+      kidPath: document.getElementById("kidPath").value,
+      noneVariants: document.getElementById("noneVariants").checked,
     });
 
     outputEl.textContent = (edited
       ? "Ran on the header/payload edited above, not the token exactly as pasted at the top.\n\n"
       : "") + data.output;
 
-    // alg:none returns several structured results at once; every other
-    // exploit still returns one token buried in free-text output, so fall
-    // back to pulling it out with extractToken() for those. Either way it
-    // ends up rendered through the same multi-row display.
     if (Array.isArray(data.tokens) && data.tokens.length) {
       renderExploitResults(data.tokens);
-    } else {
-      const newToken = extractToken(data.output, built.token);
-      if (newToken) renderExploitResults([{ token: newToken }]);
     }
   } catch (err) {
     outputEl.textContent = err.message;
