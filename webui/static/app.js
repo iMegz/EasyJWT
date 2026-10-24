@@ -324,7 +324,7 @@ document.getElementById("crackBtn").addEventListener("click", async () => {
   }
   const alg = (header.alg || "").toUpperCase();
   if (!["HS256", "HS384", "HS512"].includes(alg)) {
-    fail("Algorithm is not HMAC-SHA - cannot test against passwords, try the Verify function.");
+    fail(`Algorithm is ${alg || "not set"}, not HMAC-SHA, so there's no password to crack. For RS/ES/PS tokens, try "Recover an RSA public key" below instead.`);
     return;
   }
   const signingInput = `${parts[0]}.${parts[1]}`;
