@@ -82,6 +82,7 @@ function resetDerivedState() {
 
   document.getElementById("crackFoundBox").classList.add("hidden");
   document.getElementById("crackNotFoundBox").classList.add("hidden");
+  document.getElementById("crackError").classList.add("hidden");
   document.getElementById("crackOutput").textContent = "";
 
   document.getElementById("recoverToken1").value = "";
@@ -289,17 +290,28 @@ document.getElementById("crackBtn").addEventListener("click", async () => {
   if (!requireToken()) return;
   const btn = document.getElementById("crackBtn");
   const outputEl = document.getElementById("crackOutput");
+  const errorEl = document.getElementById("crackError");
   const foundBox = document.getElementById("crackFoundBox");
   const foundValue = document.getElementById("crackFoundValue");
   const notFoundBox = document.getElementById("crackNotFoundBox");
   foundBox.classList.add("hidden");
   notFoundBox.classList.add("hidden");
+  errorEl.classList.add("hidden");
   outputEl.textContent = "";
+
+  // Every early-return error below goes into this visible line, not just
+  // crackOutput: that output box sits collapsed inside "Full output" by
+  // default, so writing an error there only made it look like nothing
+  // happened at all.
+  function fail(message) {
+    errorEl.textContent = message;
+    errorEl.classList.remove("hidden");
+  }
 
   const token = tokenEl.value.trim();
   const parts = token.split(".");
   if (parts.length !== 3) {
-    outputEl.textContent = "That does not look like a JWT (expected 3 parts).";
+    fail("That does not look like a JWT (expected 3 parts).");
     return;
   }
 
@@ -307,12 +319,12 @@ document.getElementById("crackBtn").addEventListener("click", async () => {
   try {
     header = JSON.parse(bytesToUtf8(b64urlToBytes(parts[0])));
   } catch (err) {
-    outputEl.textContent = `Could not decode token: ${err.message}`;
+    fail(`Could not decode token: ${err.message}`);
     return;
   }
   const alg = (header.alg || "").toUpperCase();
   if (!["HS256", "HS384", "HS512"].includes(alg)) {
-    outputEl.textContent = "Algorithm is not HMAC-SHA - cannot test against passwords, try the Verify function.";
+    fail("Algorithm is not HMAC-SHA - cannot test against passwords, try the Verify function.");
     return;
   }
   const signingInput = `${parts[0]}.${parts[1]}`;
@@ -330,7 +342,7 @@ document.getElementById("crackBtn").addEventListener("click", async () => {
     // built-in wordlist just won't be tried, custom one (if any) still runs
   }
   if (jobs.length === 0) {
-    outputEl.textContent = "No wordlists available, upload a custom one";
+    fail("No wordlists available, upload a custom one");
     return;
   }
 
@@ -355,7 +367,7 @@ document.getElementById("crackBtn").addEventListener("click", async () => {
       notFoundBox.classList.remove("hidden");
     }
   } catch (err) {
-    outputEl.textContent = err.message;
+    fail(err.message);
   } finally {
     setLoading(btn, false);
   }
@@ -525,10 +537,24 @@ exploitCode.addEventListener("change", updateExploitUI);
 
 // ---------- Spoof JWKS: kid dropdown, fetched from the URL automatically ----------
 // The two built-in options (Manual, Default) are marked with data-builtin and
-// never removed; only options fetched from a URL get added/cleared around them.
+// never removed outright; only options fetched from a URL get added/cleared
+// around them. The Default option itself gets hidden (not removed) once a
+// custom URL's own kid(s) are fetched successfully, since "Default" then
+// refers to a kid that URL almost certainly doesn't actually serve, and
+// restored whenever the URL field is cleared or the fetch finds nothing.
+function defaultKidOption() {
+  return document.querySelector('#jwksKidSelect option[value="easyjwt-default-1"]');
+}
+
+function setDefaultKidVisible(visible) {
+  const opt = defaultKidOption();
+  opt.hidden = !visible;
+}
+
 function resetJwksKidSelect() {
   const selectEl = document.getElementById("jwksKidSelect");
   selectEl.querySelectorAll("option:not([data-builtin])").forEach((opt) => opt.remove());
+  setDefaultKidVisible(true);
   selectEl.value = "easyjwt-default-1";
 }
 
@@ -552,6 +578,7 @@ async function fetchJwksKidsForSelect() {
       selectEl.appendChild(opt);
     });
     if (kids.length) {
+      setDefaultKidVisible(false);
       selectEl.value = kids[0];
       statusEl.textContent = kids.length === 1
         ? `Found one key there, kid set to "${kids[0]}".`
@@ -576,22 +603,45 @@ document.getElementById("jwksUrl").addEventListener("change", fetchJwksKidsForSe
 // Run exploit itself when a URL is there but the PEM box isn't filled yet.
 // Returns true on success, false on failure (status line already has the
 // reason either way, callers just need to know whether to keep going).
+//
+// Clicking "Run exploit" blurs the URL field first, which fires its own
+// "change" listener below, starting a fetch independently of the explicit
+// check Run exploit's own handler does a moment later for the same URL.
+// Without de-duping, that's two concurrent requests to a rate-limited
+// endpoint: the second one can get a 429, which Run exploit's handler then
+// reads as "conversion failed" and bails out before ever running the
+// exploit, even though the first request succeeded and filled the PEM
+// right in front of you. Tracking the in-flight promise per URL collapses
+// any second caller onto the same request instead of firing a duplicate.
+let _pubkeyFetchUrl = null;
+let _pubkeyFetchPromise = null;
+
 async function fetchAndFillPubkey(url) {
   const statusEl = document.getElementById("fetchPubkeyStatus");
   if (!url) {
     statusEl.textContent = "";
     return false;
   }
-  statusEl.textContent = "Fetching key from that URL...";
-  try {
-    const data = await postJSON("/api/fetch-pubkey", { url });
-    document.getElementById("pubkey").value = data.pem;
-    statusEl.textContent = data.note;
-    return true;
-  } catch (err) {
-    statusEl.textContent = err.message;
-    return false;
+  if (_pubkeyFetchPromise && _pubkeyFetchUrl === url) {
+    return _pubkeyFetchPromise;
   }
+  statusEl.textContent = "Fetching key from that URL...";
+  _pubkeyFetchUrl = url;
+  _pubkeyFetchPromise = (async () => {
+    try {
+      const data = await postJSON("/api/fetch-pubkey", { url });
+      document.getElementById("pubkey").value = data.pem;
+      statusEl.textContent = data.note;
+      return true;
+    } catch (err) {
+      statusEl.textContent = err.message;
+      return false;
+    } finally {
+      _pubkeyFetchUrl = null;
+      _pubkeyFetchPromise = null;
+    }
+  })();
+  return _pubkeyFetchPromise;
 }
 
 document.getElementById("pubkeyUrl").addEventListener("change", () => {
@@ -718,12 +768,26 @@ document.getElementById("recoverPubkeyBtn").addEventListener("click", async () =
 
 document.getElementById("recoverPubkeyUseBtn").addEventListener("click", () => {
   const pem = document.getElementById("recoverPubkeyValue").textContent;
-  if (pem) {
-    switchTab("exploits");
-    exploitCode.value = "k";
-    updateExploitUI();
-    document.getElementById("pubkey").value = pem;
+  if (!pem) return;
+
+  // Also carry over one of the two tokens recovery used: Key confusion
+  // needs a token to re-sign, and recovering a key with nothing to use it
+  // on isn't the point, so hand it the same one, not just the PEM. Setting
+  // tokenEl.value directly (not via user interaction) doesn't fire the
+  // token-changed reset, which would otherwise wipe the PEM right back out
+  // the moment a token lands in the field.
+  const token1 = document.getElementById("recoverToken1").value.trim();
+  if (token1) {
+    tokenEl.value = token1;
+    lastTokenValue = token1;
+    updateTokenSegments();
   }
+
+  switchTab("exploits");
+  exploitCode.value = "k";
+  updateExploitUI();
+  document.getElementById("pubkey").value = pem;
+  loadTokenIntoExploitEditor();
 });
 updateExploitUI();
 
