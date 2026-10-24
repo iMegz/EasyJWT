@@ -17,7 +17,7 @@ This toolkit is for legal use only: your own applications, CTFs, authorized labs
 - `docker-compose.yml`, for local use: starts the image with the wordlists folder mounted.
 - `webui/`, the Flask app (now just a handful of server-side-only routes), HTML, CSS and JS.
 - `wordlists/`, the built-in wordlist(s) used automatically for cracking. These are baked into the image and fetched into the browser to crack against, but never displayed anywhere in the UI itself, users just see "Built-in wordlist" as a label in the results.
-- `start.bat` / `shutdown.bat`, Windows helpers so anyone who clones this repo can run it locally with a double click instead of typing Docker commands. `setup.bat` still exists and just runs `start.bat` for anyone used to the old two-step flow.
+- `start.bat` / `shutdown.bat`, Windows helpers so anyone who clones this repo can run it locally with a double click instead of typing Docker commands.
 
 ## Running locally (Windows + Docker Desktop)
 
